@@ -8,8 +8,11 @@ pass finds where things sit, and a later one decides what they mean.
 
 ## Status
 
-Early. The binary prints a greeting and nothing else. The design and the
-milestone map are written, and the first milestone has yet to start.
+Early. M0 (echo) is done: `jsptx` reads standard input and writes it to
+standard output byte for byte, over a single padded buffer, with `--buf-size`
+to force the read loop's edge cases. M1 through M3 have yet to start. CI builds
+and tests on Linux (every push) and macOS (daily, or on request) at both `c17`
+and `c99`.
 
 ## Building
 
@@ -30,6 +33,7 @@ The design targets x86-64 and arm64, on macOS and on Linux.
 | -------------------- | --------------------------------------------------- |
 | `docs/design.md`     | The decisions that bind, with reasons, and the milestone map |
 | `docs/brainstorm.md` | The exploration that led there, including the options `design.md` rejects |
+| `docs/c-style.md`    | C conventions beyond `.clang-format` and `CLAUDE.md` |
 
 ## AI-Assisted Development
 
