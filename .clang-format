@@ -1,0 +1,11 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+ColumnLimit: 96
+AlignConsecutiveDeclarations: true
+PenaltyReturnTypeOnItsOwnLine: 16
+InsertNewlineAtEOF: true
+AlwaysBreakBeforeMultilineStrings: true
+AlignAfterOpenBracket: BlockIndent
