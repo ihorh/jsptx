@@ -1,342 +1,254 @@
-# jxs: a Json Stream Console Parser Better Than jq
+# jsptx — Design and Milestones
 
-Notes from a design conversation held on 31 August 2026 about a conceptual tool,
-`jxs` (json Streamer), meant to outperform `jq` for streaming JSON on the
-console.
+`jsptx` finds the structure in a JSON byte stream using SIMD, one 64-byte block
+at a time. It reads standard input, and it emits the byte offset of every
+character that carries structure.
 
-## Problems With `jq` to Solve
+This document records what the design settled on and why, and it splits the
+work into four milestones. Each milestone is a branch. `docs/brainstorm.md`
+holds the earlier exploration that led here, including options this document
+rejects.
 
-- A steep, obtuse domain-specific language (DSL).
-- High memory overhead on massive files.
-- Crashing or stalling on malformed or incomplete stream chunks.
+The tool was called `jxs` in that brainstorm. It is `jsptx` everywhere now.
 
-## Core Architecture and Improvements Over `jq`
+## What jsptx Is, and Is Not
 
-- **SIMD-accelerated parsing**: use simdjson principles, or Rust's `simd-json`,
-  to parse raw bytes at gigabyte-per-second speeds, bypassing `jq`'s
-  sequential bottleneck.
-- **Familiar scripting (JavaScript/expr) over a DSL**: instead of `jq`'s
-  cryptic syntax, use standard embedded JavaScript (via QuickJS or V8) or a
-  clean, familiar expression language such as SQL or JMESPath, mirroring
-  tools like `fx`.
-- **Tolerant stream recovery**: automatically recover from
-  newline-delimited, fragmented, or trailing incomplete JSON chunks without
-  crashing the pipe.
-- **O(1) memory streaming**: process infinite streams by evaluating elements
-  lazily as tokens arrive, rather than slurping input or building heavy ASTs
-  in memory.
+The end goal is a streaming JSON tool that beats `jq` on throughput and on
+memory. That tool needs a parser, and the parser starts with the pass that finds
+structure. These four milestones build that pass and stop there.
 
-## Key Features of `jxs`
+These milestones stop at offsets. Reading numbers, unescaping strings, and
+building a tree all sit past that boundary, and so do the expression language
+and the output writer.
 
-- **Intuitive chaining**: standard dot notation and array methods (`.map`,
-  `.filter`) used natively.
-- **Live interactive and pipe dual mode**: default to a high-throughput CLI
-  pipe, but press a hotkey (such as Ctrl+F or Tab) to instantly fork into an
-  interactive terminal UI (TUI) for digging through the live stream tree.
-- **Grep-friendly flat output (like `gron`)**: an optional mode that flattens
-  paths (`data.users.0.name = "Alice"`) so standard Unix tools like `grep`,
-  `sed`, and `awk` work seamlessly out of the box.
+## Decisions That Bind
 
-## Proposed Syntax Comparison
+### Standard Input Only
 
-`jq` (cryptic DSL):
+`jsptx` reads file descriptor 0 and takes no path argument. A path argument
+invites `mmap`, and `mmap` hands the program an aligned, padded, whole buffer
+for free. That deletes the streaming problem this project exists to solve.
 
-```bash
-cat stream.json | jq -c 'select(.level == "error") | .message'
+Streaming does not beat the operating system. Reading with `read(2)` instead of
+`fread` saves one copy, which is noise next to the SIMD win. The reason to own
+the buffer is that the SIMD pass needs padding and a controlled tail, and stdio
+provides neither.
+
+ISO C's `fread` also blocks until it fills the whole buffer. Ask for 256 KB and
+it waits for 256 KB or for end of file, so a slow writer stalls the tool.
+`read(2)` returns what has arrived.
+
+### The Block Is 64 Bytes on Every Architecture
+
+AVX2 registers hold 32 bytes and NEON registers hold 16. The program still steps
+64 bytes at a time on both. The mask is therefore always a `uint64_t`, and the
+block boundary always falls in the same place.
+
+That confines the architecture-specific code to one function:
+
+```c
+uint64_t jsp_classify64(const uint8_t *p);
 ```
 
-`jxs` (JavaScript/expr engine):
+x86-64 implements it with two AVX2 loads and two `_mm256_movemask_epi8` calls,
+combined into 64 bits. AArch64 implements it with four NEON loads and four mask
+extractions. A scalar version implements it for every other target.
 
-```bash
-cat stream.json | jxs "x => x.level === 'error' ? x.message : null"
-```
+Everything downstream is portable C99: the tail mask, the bit iteration through
+`__builtin_ctzll`, the offset arithmetic, and the refill.
 
-## Open Questions From the Initial Proposal
+### The Index Stream Is the Contract, the Mask Is a Detail
 
-- Which underlying language runtime to use: Rust, Go, or QuickJS.
-- What memory buffer strategy to use for handling broken network streams.
-- How to design the TUI interface controls.
-
-
-## Follow-Up: Language Choice and DIY SIMD in C
-
-User's question (31 August 2026, lightly cleaned up):
-
-> I'd start with a few very practical use cases instead of solving a generic
-> problem. Also not sure — I like C more, but it seems Rust is a great choice
-> for building this tool. I'm also thinking about Zig. How hard is it to
-> implement a SIMD parser on my own in C?
-
-### C, Rust, or Zig for a Custom SIMD Parser
-
-Building a SIMD JSON parser from scratch in C is highly challenging but
-deeply rewarding. It requires a strong grasp of bitwise operations, CPU
-intrinsics (AVX2/NEON), and state-machine design.
-
-For a custom stream parser, Zig or C are actually better choices than Rust
-if you want absolute control over memory layout and zero-allocation
-streaming. Rust's `simd-json` is excellent, but it heavily relies on its type
-system and ownership model, which can add abstraction overhead when dealing
-with raw, fragmented byte streams.
-
-### Step 1: Three Practical Streaming Use Cases
-
-Instead of a generic parser, design specifically for these three
-hyper-practical operations:
-
-1. **The structural filter (drop noise)**: pass through only the JSON
-   objects where `level == "error"`, instantly discarding megabytes of debug
-   logs without allocating memory for them.
-2. **The plucker (extract value)**: extract a nested value (for example
-   `$.user.id`) from a massive array of objects and print it to stdout
-   line by line.
-3. **The structurer (convert to CSV)**: pluck three specific keys
-   (`timestamp`, `status`, `ip`) and output them as raw tab-separated values
-   for immediate Unix pipe chaining.
-
-### How SIMD JSON Parsing Works: the Two-Pass Architecture
-
-To implement this in C, you cannot use traditional character-by-character
-loops. You must use the two-pass architecture popularized by the simdjson
-paper:
+Default output is one line per structural character:
 
 ```text
-[ Pass 1: Structural Indexing ]  --> Scans 32/64 bytes at once using SIMD.
-                                     Finds structural characters: {, }, [, ], :, ,, ", \
-                                     Outputs a bitmask/array of structural positions.
-
-[ Pass 2: Token Navigation ]     --> Skips all whitespace and internal string data.
-                                     Jumps directly to the structural indexes.
-                                     Evaluates your filter/pluck expression.
+<byte offset>\t<character>
 ```
 
-### Implementing Pass 1 in C (AVX2 Example)
+The offset is absolute in the stream. A mask is not. It says where a character
+sits inside its block, and the block boundary moves with the read size. Piping the same file in 100-byte writes changes every mask and changes no
+offset.
 
-A conceptual, simplified implementation of Pass 1 in C using Intel AVX2
-intrinsics. It processes 32 bytes at a time in a single CPU instruction,
-identifying where structural JSON tokens start.
+Two acceptance criteria depend on that stability. The same input must produce
+identical output on Apple silicon and on x86-64, and it must produce identical
+output at any buffer size. Only the offsets can carry a golden.
+
+`--masks` prints the raw hex masks anyway, because reading them is how a person
+debugs the classifier.
+
+### Three Portability Tiers
+
+Pure ANSI C is off the table, because the classifier includes `<immintrin.h>` or
+`<arm_neon.h>`, and both headers belong to the compiler rather than to a
+standard. Given that, the rule is where each tier may appear.
+
+| Tier | What it covers | Where it lives |
+| --- | --- | --- |
+| ISO C99 | Buffers, masks, offsets, state, flags | Everywhere |
+| POSIX | `read`, `write`, and `pipe` in tests | One file |
+| Compiler intrinsics | `jsp_classify64` | One file per architecture |
+
+POSIX buys exactly one thing worth having, which is `read(2)` on a descriptor.
+Alignment needs nothing, because both architectures load unaligned at full
+speed, so plain `malloc` with an over-allocated pad replaces `posix_memalign`
+and C11's `aligned_alloc`. Flag parsing is a dozen lines by hand, so `getopt`
+stays out.
+
+Under `-std=c99` the POSIX declarations are hidden. The I/O file defines
+`_POSIX_C_SOURCE 200809L` ahead of its includes, or `read` arrives undeclared.
+
+### Nesting Is Bounded, and Recursion Is Banned
+
+A JSON parser needs one bit per nesting level, recording whether the current
+container is an object or an array. An explicit array of bits holds that as
+well as the call stack does.
+
+Recursive descent on a million open brackets overflows the C stack and crashes,
+reporting nothing. An explicit stack that grows on demand converts that crash
+into unbounded memory growth from hostile input. A fixed bound converts it into
+an error at the exact byte, found with no lookahead. It also holds the parser's
+memory constant for every input. RFC 8259 §9 permits an implementation to limit
+nesting depth.
+
+At a bound of 64 or less the whole stack is one `uint64_t`. Push is
+`stack = (stack << 1) | is_object`, pop is `stack >>= 1`, and the current
+container is `stack & 1`.
+
+### Tests Are C, Driven Through Descriptors
+
+The pipeline entry point takes descriptors and a buffer size:
 
 ```c
-#include <immintrin.h>
-#include <stdint.h>
-#include <stdio.h>
-
-// Identifies structural characters in a 32-byte chunk
-void identify_structural_chars(const uint8_t *block, uint32_t *out_mask) {
-    // Load 32 bytes of raw JSON stream into a 256-bit vector
-    __m256i data = _mm256_loadu_si256((const __m256i*)block);
-
-    // Create comparison vectors for target JSON structural characters
-    __m256i brace_open  = _mm256_set1_epi8('{');
-    __m256i brace_close = _mm256_set1_epi8('}');
-    __m256i colon       = _mm256_set1_epi8(':');
-    __m256i comma       = _mm256_set1_epi8(',');
-    __m256i quote       = _mm256_set1_epi8('"');
-
-    // Compare our data vector against all targets simultaneously
-    __m256i cmp_bo  = _mm256_cmpeq_epi8(data, brace_open);
-    __m256i cmp_bc  = _mm256_cmpeq_epi8(data, brace_close);
-    __m256i cmp_col = _mm256_cmpeq_epi8(data, colon);
-    __m256i cmp_com = _mm256_cmpeq_epi8(data, comma);
-    __m256i cmp_q   = _mm256_cmpeq_epi8(data, quote);
-
-    // Combine all match vectors using bitwise OR
-    __m256i structural = _mm256_or_si256(
-        _mm256_or_si256(cmp_bo, cmp_bc),
-        _mm256_or_si256(cmp_col, _mm256_or_si256(cmp_com, cmp_q))
-    );
-
-    // Extract the internal 8-bit match results into a single 32-bit integer bitmask
-    // Each '1' bit represents the exact index of a structural character in the 32-byte block
-    *out_mask = (uint32_t)_mm256_movemask_epi8(structural);
-}
-
-int main() {
-    // 32 bytes of a sample JSON log line
-    const uint8_t chunk[32] = "{\"level\":\"error\",\"msg\":\"failed\"}";
-    uint32_t mask = 0;
-
-    identify_structural_chars(chunk, &mask);
-
-    printf("JSON Chunk: %s\n", chunk);
-    printf("SIMD Structural Bitmask (Hex): 0x%08X\n", mask);
-    // You can now use __builtin_ctz (count trailing zeros) to rapidly step through the '1' bits
-    return 0;
-}
+int jsp_run(int in_fd, int out_fd, size_t buf_size);
 ```
 
-### The Reality Check: Four Hardest Hurdles in C or Zig
+A test creates a `pipe()`, writes the input in whatever chunk sizes it chooses,
+runs the pipeline, and compares what comes back. Short reads are the property
+that matters most in the read loop, and a file on disk cannot produce one. A
+pipe can.
 
-If you build this yourself, Pass 1 is the easy part. The actual complexity
-lies in handling the edges:
+`jzbuild` already builds one binary per `tests/*_test.c` behind `zig build
+test`, so this needs no build wiring. Shell tests against the installed binary
+may follow later, once the command-line surface is worth testing as a surface.
 
-- **The string quote problem**: a colon `:` inside a string
-  (`"url": "http://foo"`) is not a structural element. Your SIMD pass must
-  compute a "string mask" to toggle structural recognition off while inside
-  quotes. Handling escaped quotes (`\"`) inside SIMD is notoriously tricky.
-- **Buffer alignments**: SIMD vectors require data to be read in strict 32-
-  or 64-byte blocks. If your network socket or file read cuts off mid-chunk,
-  you must handle the manual padding of the remaining bytes without reading
-  out of bounds.
-- **Cross-platform vectorization**: if you write raw AVX2 intrinsics
-  (`_mm256_*`), your code will crash on ARM (Mac M-series, AWS Graviton). You
-  will need to write a fallback ARM NEON block using `vld1q_u8`, or use
-  Zig's native `@Vector` syntax, which auto-compiles to the host
-  architecture's SIMD.
-- **State machine tracking**: to perform "the plucker" use case efficiently,
-  Pass 2 must maintain a tiny, fast stack of keys (for example matching
-  `user` then `id`) as it steps through the SIMD structural indexes.
+## The Milestones
 
-### Why Zig Is an Incredible Middle Ground
+### M0 — Echo
 
-If you love C, Zig gives you the exact same memory layout power but solves
-the SIMD portability nightmare. In Zig, you don't need CPU-specific
-intrinsics. You can write:
+Read standard input and write it to standard output, byte for byte. There is no
+JSON in this milestone. It exists because the read loop, the write loop, and the
+test harness are the floor everything else stands on.
 
-```zig
-const bytes: @Vector(32, u8) = stream_buffer[0..32].*;
-const matches = bytes == @as(@Vector(32, u8), @splat('{'));
-```
+The work:
 
-The Zig compiler will automatically compile that into AVX2 instructions on
-Intel, NEON on ARM, or a fast unrolled loop if the CPU doesn't have SIMD.
+- A single buffer allocation, its capacity a multiple of 64, plus 64 bytes of
+  padding that later milestones fill.
+- A read loop that treats a return of 0 as end of file, retries on `EINTR`, and
+  treats a short read as ordinary rather than as the end.
+- A write loop, because `write(2)` on a pipe also returns short and must be
+  resumed.
+- `--buf-size=N`, which the tests use to force the loop into its edge cases.
 
-### Open Questions From This Follow-Up
+Accepted when the echo is byte-identical across four inputs: empty, one byte,
+larger than the buffer, and delivered in one-byte pipe writes.
 
-- Implement use case 1 (the structural filter) or use case 2 (the plucker)
-  first?
-- Target portable Zig vector code, or stick to pure C/AVX2 for maximum
-  bare-metal transparency?
+Block consumption and the carried remainder arrive in M1, because M0 has nothing
+that consumes a block.
 
-## Follow-Up: Mac M-Series Compatibility
+### M1 — Structural Index
 
-User's question (31 August 2026):
+Classify `{`, `}`, `[`, `]`, `:`, `,`, and `"` in 64-byte blocks, and emit the
+absolute offset of each one.
 
-> What about a version compatible also with Mac M series?
+The work:
 
-To make a custom SIMD JSON parser compatible with Apple M-series chips
-(ARM64 architecture) alongside Intel/AMD (x86_64), there are two distinct
-architectural paths depending on whether you choose C or Zig. Apple Silicon
-uses ARM NEON (128-bit vectors) instead of Intel's AVX2 (256-bit vectors).
+- `jsp_classify64` in three implementations: AVX2, NEON, and scalar.
+- The scalar version is also the test oracle. On random input the SIMD result
+  must equal the scalar result, which is the cheapest real confidence available
+  and it costs one test.
+- Block consumption, then a `memmove` of the sub-block remainder to offset 0,
+  then a read in behind it.
+- The end-of-file tail, the one partial block per run. Pad it with `0x20`,
+  classify it, then clear the mask bits past the real length.
+- Bit iteration with `__builtin_ctzll`, and the `<offset>\t<char>` output.
+- `--masks`.
 
-### Strategy 1: the C Route (Architecture-Specific Branches)
+Accepted when three comparisons match. arm64 must equal x86-64. Buffer sizes 64,
+65, 4096, and 1 MiB must all agree. The scalar and SIMD classifiers must agree
+on random bytes.
 
-In pure C, you must write two separate implementations using compiler
-macros to detect the processor type at compile time. You trade off 32-byte
-chunks on Intel for 16-byte chunks on ARM, processing two chunks
-back-to-back on ARM to keep up.
+M1 is wrong on purpose for any structural character inside a string, so
+`{"url":"http://x{y}"}` reports braces that carry no structure. Those fixtures
+live in `tests/data/strings/`, M1 does not run them, and M2 must pass them.
 
-```c
-#include <stdint.h>
-#include <stdio.h>
+An invalid document such as `{"a":}` produces a correct index stream, because
+this pass validates nothing. An invalid fixture at M1 asserts only that the
+program survives it and reports the right offsets.
 
-#if defined(__ARM_NEON) || defined(__ARM_NEON__)
-    #include <arm_neon.h>
-    #define PLATFORM_ARM 1
-#elif defined(__AVX2__)
-    #include <immintrin.h>
-    #define PLATFORM_X86 1
-#endif
+### M2 — String Mask
 
-// Multi-platform structural token identifier
-uint32_t identify_structural_chars_portable(const uint8_t *block) {
-    uint32_t mask = 0;
+Turn off structural recognition inside strings, and make the `strings/`
+fixtures pass.
 
-    #if defined(PLATFORM_X86)
-        // Intel/AMD AVX2 Path: Processes 32 bytes at once
-        __m256i data = _mm256_loadu_si256((const __m256i*)block);
-        __m256i brace_open = _mm256_set1_epi8('{');
-        __m256i brace_close = _mm256_set1_epi8('}');
+The work:
 
-        __m256i cmp = _mm256_or_si256(_mm256_cmpeq_epi8(data, brace_open),
-                                      _mm256_cmpeq_epi8(data, brace_close));
-        mask = (uint32_t)_mm256_movemask_epi8(cmp);
+- The backslash mask, and the run-start parity that decides whether a quote is
+  real or escaped.
+- A prefix XOR over the real-quote mask, which yields the in-string mask. Six
+  shift-and-XOR steps on a `uint64_t` compute it, so the carry-less multiply
+  instruction is an optimization rather than a requirement.
+- The two bits that cross a block boundary, and cross a refill with it: still
+  inside a string, and still inside a backslash run.
+- The structural mask becomes `structural & ~in_string`.
+- A sink mode that classifies and discards, because one line per structural
+  character emits more bytes than it reads, and a throughput number measured
+  through `printf` measures `printf`.
+- A benchmark, and then the nibble shuffle table. Seven compares and six ORs per
+  block become roughly four operations on both architectures, through
+  `_mm256_shuffle_epi8` and `vqtbl1q_u8`. The table lands with a measured
+  before and after, or it does not land.
 
-    #elif defined(PLATFORM_ARM)
-        // Apple Silicon NEON Path: Processes 16 bytes at once
-        uint8x16_t data = vld1q_u8(block);
-        uint8x16_t brace_open = vdupq_n_u8('{');
-        uint8x16_t brace_close = vdupq_n_u8('}');
+Accepted when the `strings/` fixtures pass, the cross-architecture and
+cross-buffer-size criteria from M1 still hold, and the benchmark reports a
+number from the sink mode.
 
-        uint8x16_t cmp = vorrq_u8(vceqq_u8(data, brace_open),
-                                  vceqq_u8(data, brace_close));
+### M3 — Depth and Framing
 
-        // Extracting bitmask on ARM NEON requires narrowing down bytes to bits
-        // We use a common shift-and-add trick to combine the results into a 16-bit integer
-        static const uint8_t __attribute__((aligned(16))) shift_data[16] = {
-            1, 2, 4, 8, 16, 32, 64, 128,
-            1, 2, 4, 8, 16, 32, 64, 128
-        };
-        uint8x16_t shift_mask = vld1q_u8(shift_data);
-        uint8x16_t masked = vandq_u8(cmp, shift_mask);
+A scalar pass over the index stream that tracks nesting and finds record
+boundaries.
 
-        // Pairwise addition down to a single 16-bit value
-        uint16x8_t paired = vpaddlq_u8(masked);
-        uint32x4_t quad = vpaddlq_u16(paired);
-        uint64x2_t dual = vpaddlq_u32(quad);
+The work:
 
-        uint64_t low = vgetq_lane_u64(dual, 0);
-        uint64_t high = vgetq_lane_u64(dual, 1);
-        mask = (uint32_t)(low | (high << 8));
-    #else
-        // Fallback standard scalar loop if no SIMD is present
-        for(int i = 0; i < 16; i++) {
-            if (block[i] == '{' || block[i] == '}') mask |= (1 << i);
-        }
-    #endif
+- The bit stack, `--max-depth` with a default of 64, and a word array above 64.
+- An error at the exact byte for a depth overrun, for a mismatched close
+  bracket, and for a close bracket arriving on an empty stack.
+- Depth returning to zero, which marks one complete top-level value. That is the
+  record boundary a streaming filter needs, and it is what makes concatenated
+  and newline-delimited JSON work without a special case.
 
-    return mask;
-}
-```
+Accepted when nesting errors report the right byte, and when a stream of
+concatenated records reports the right boundaries.
 
-### Strategy 2: the Zig Route (Hardware Agnostic)
+Still not validated here: numbers, literals, key uniqueness, UTF-8, and any
+grammar rule beyond bracket matching.
 
-If you use Zig, you do not need to deal with platform macros, `arm_neon.h`,
-or `immintrin.h`. Zig features an explicit built-in `@Vector` type. The
-standard compiler target evaluates the system architecture and emits the
-correct hardware assembly (AVX2 instructions on Intel Mac/Linux, NEON
-instructions on M1/M2/M3 Apple devices) seamlessly.
+## Deferred, with Reasons
 
-```zig
-const std = @import("std");
+- **`mmap`.** It is genuinely faster for files and it is the right benchmark
+  ceiling. It is out of the milestones because it removes the tail and the
+  refill, which are the work.
+- **Zig `@Vector`.** It solves the portable comparison and leaves the mask
+  extraction, which is the hard half. The project is C, and one function is a
+  small enough seam to hand-write.
+- **Clang vector extensions.** Same limit as Zig's vectors, for the same reason:
+  no portable movemask.
+- **Pseudo-structural characters.** A real second pass needs the first byte of
+  every scalar value, not only the structural characters. It is cheap to add and
+  nothing consumes it yet.
+- **Everything past pass one.** The value filter, the plucker, the CSV writer,
+  the expression language, and the TUI all live in `docs/brainstorm.md`.
 
-pub fn identifyStructural(block: *const [16]u8) u16 {
-    // Treat the byte array as a hardware SIMD Vector
-    const data: @Vector(16, u8) = block.*;
+## Open Questions
 
-    // Create broad comparison vectors
-    const b_open: @Vector(16, u8) = @splat('{');
-    const b_close: @Vector(16, u8) = @splat('}');
-
-    // Perform SIMD vector comparisons across all elements concurrently
-    const match_open = (data == b_open);
-    const match_close = (data == b_close);
-
-    // Vector OR compiles directly to 'vorrq_u8' on ARM and '_mm_or_si128' on x86
-    const combined_matches = match_open | match_close;
-
-    // Pack the boolean vector results cleanly into a 16-bit scalar integer mask
-    return @bitCast(combined_matches);
-}
-```
-
-### Performance Differences: Mac M-Series vs. Intel
-
-When running this code on an M-series Mac:
-
-- **The latency advantage**: Apple Firestorm/Avalanche performance cores
-  feature massive instruction decode widths (up to 8 instructions per
-  cycle). The token navigation phase (Pass 2) will actually execute
-  significantly faster than on most standard Intel CPUs.
-- **The width limitation**: because ARM NEON tops out at 16 bytes per vector
-  (128-bit) compared to AVX2's 32 bytes (256-bit), you will step through the
-  input stream file in increments of 16 bytes instead of 32 bytes per
-  iteration.
-
-### Open Questions From This Follow-Up
-
-- Prefer the Zig approach to avoid platform maintenance overhead, or the
-  explicit C path to deeply understand how ARM and Intel handle SIMD
-  registers differently?
-- Focus on use case 1 (the structural filter) to isolate the target objects
-  next?
+- Whether the test step should build with a sanitizer, and which one.
+- Whether `.claude-notes/` exists in this repository, and whether git tracks it.

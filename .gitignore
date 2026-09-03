@@ -5,3 +5,4 @@ compile_commands.json
 zig-pkg/
 zig-out/
 .cache/
+.claude-notes/
