@@ -242,6 +242,17 @@ grammar rule beyond bracket matching.
   small enough seam to hand-write.
 - **Clang vector extensions.** Same limit as Zig's vectors, for the same reason:
   no portable movemask.
+- **A lookup table in the scalar classifier.** A 256-entry table answers "is
+  this byte structural" with one load. It measured about five times the
+  comparison chain's throughput on Apple silicon, and a 65536-entry table
+  reading two bytes at a time doubled that again. Both are out because the
+  scalar path serves targets without SIMD, and those cores carry a small L1
+  cache. A 64 KB table is slowest on exactly the hardware it exists for. The
+  comparison chain also stays because it is the test oracle.
+- **SWAR in the scalar classifier.** Comparing 8 bytes at a time through a
+  64-bit register measured slower than the 256-entry table and read worse than
+  either alternative. Clang also auto-vectorized it into NEON, so the number it
+  produced described the compiler rather than the technique.
 - **Pseudo-structural characters.** A real second pass needs the first byte of
   every scalar value, not only the structural characters. It is cheap to add and
   nothing consumes it yet.
