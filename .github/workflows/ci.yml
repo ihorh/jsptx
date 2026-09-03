@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        c-std: [c17, c99]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: "0.16.0"
+      - run: zig build -Dc-std=${{ matrix.c-std }}
+      - run: zig build test -Dc-std=${{ matrix.c-std }}
+
+  # macOS runners cost 10x a Linux runner's minutes, so this only runs once
+  # linux has already passed, and only on main, a daily schedule, or by hand —
+  # not on every PR push.
+  macos:
+    needs: linux
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        c-std: [c17, c99]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: "0.16.0"
+      - run: zig build -Dc-std=${{ matrix.c-std }}
+      - run: zig build test -Dc-std=${{ matrix.c-std }}
