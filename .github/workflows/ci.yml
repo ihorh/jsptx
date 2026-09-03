@@ -16,28 +16,50 @@ jobs:
         c-std: [c17, c99]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v1
-        with:
-          version: "0.16.0"
+      - uses: actions/checkout@v7
+      - uses: mlugg/setup-zig@v2
       - run: zig build -Dc-std=${{ matrix.c-std }}
       - run: zig build test -Dc-std=${{ matrix.c-std }}
 
+  # The scheduled run fires daily whether or not main moved; skip macOS on it
+  # when nothing landed since the run 24 hours ago, matching the cron cadence.
+  # workflow_dispatch is a human asking on purpose, so it always counts as
+  # "changed".
+  check-changes:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          if [ -n "$(git log --since='24 hours ago' --oneline)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # macOS runners cost 10x a Linux runner's minutes, so this only runs once
-  # linux has already passed, and only on main, a daily schedule, or by hand —
-  # not on every PR push.
+  # linux has already passed, and only on the daily schedule (and only when
+  # main actually changed since the last one) or a manual dispatch — never on
+  # a plain push or PR.
   macos:
-    needs: linux
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    needs: [linux, check-changes]
+    if: |
+      always() &&
+      needs.linux.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'schedule' && needs.check-changes.outputs.changed == 'true'))
     strategy:
       fail-fast: false
       matrix:
         c-std: [c17, c99]
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v1
-        with:
-          version: "0.16.0"
+      - uses: actions/checkout@v7
+      - uses: mlugg/setup-zig@v2
       - run: zig build -Dc-std=${{ matrix.c-std }}
       - run: zig build test -Dc-std=${{ matrix.c-std }}
