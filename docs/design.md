@@ -207,6 +207,56 @@ An invalid document such as `{"a":}` produces a correct index stream, because
 this pass validates nothing. An invalid fixture at M1 asserts only that the
 program survives it and reports the right offsets.
 
+### M1a — Block Iteration
+
+An intermediate milestone between M1 and M2. It changes no output. It reshapes
+the loop that M2 and M3 both extend, before either one grows into it.
+
+The work:
+
+- `jsp_block`, a borrowed view over one block: a pointer and a length, and
+  nothing else. The stream offset stays a parameter, because a block is what
+  the bytes are rather than where they came from.
+- One function that processes a block, partial or complete alike. A tail block
+  pads with `0x20` and carries a short length. Trimming its mask to that
+  length is the whole of what the partial case costs.
+- Iteration in terms of blocks rather than bytes. `jsp_run` asks a reader for
+  the next block and processes it. Today it instead counts the blocks a buffer
+  holds, walks them, moves the remainder to offset 0, and reads in behind it.
+
+Accepted when M1's own criteria still hold byte for byte. The same offsets at
+buffer sizes 64, 65, 4096, and 1 MiB, and on both architectures.
+
+#### The Reader Answers Three Ways, Not Two
+
+A reader that returns a boolean gives one answer for "the stream ended" and
+for "`read` failed". The failure then hides in the reader's state, where a
+caller may walk past it, and the symptom is a truncated index that reports
+success. Three answers cost one enum and remove that: a block, the end, and
+an error.
+
+The reader yields no zero-length block. A stream ending on a block boundary
+simply ends, and the tail case runs only when bytes remain.
+
+#### The Loop Shape Is Free, and the Call Is Not
+
+Measured at `-O2` on arm64, before this milestone, the block loop is ten
+instructions. Two of them are the loop counter, and clang unrolls none of it.
+A reader replaces those two with a compare against the fill mark, so the shape
+costs nothing.
+
+`jsp_classify64` costs more. It compiles to a `bl` inside that loop, once per
+block, because the classifier is its own translation unit. Link-time
+optimization removes it. Built with `-flto`, clang inlines the NEON
+classifier into the loop, and the binary holds no call to any classifier. M2's
+benchmark measures an LTO build for that reason, and M2's nibble table is
+worth measuring only against one — a call per block dwarfs what that table
+saves.
+
+LTO also leaves the intrinsics in one file per architecture, which the
+portability tiers above require. Moving the classifier into the loop's own
+file would buy the same inlining and break that row.
+
 ### M2 — String Mask
 
 Turn off structural recognition inside strings, and make the `strings/`
