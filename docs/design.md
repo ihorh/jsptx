@@ -245,17 +245,21 @@ instructions. Two of them are the loop counter, and clang unrolls none of it.
 A reader replaces those two with a compare against the fill mark, so the shape
 costs nothing.
 
-`jsp_classify64` costs more. It compiles to a `bl` inside that loop, once per
-block, because the classifier is its own translation unit. Link-time
-optimization removes it. Built with `-flto`, clang inlines the NEON
-classifier into the loop, and the binary holds no call to any classifier. M2's
-benchmark measures an LTO build for that reason, and M2's nibble table is
-worth measuring only against one — a call per block dwarfs what that table
-saves.
+`jsp_classify64` cost more, for the same reason: it compiled to a `bl` inside
+that loop, once per block, because the classifier was its own translation
+unit. Fixed by moving `jsp_classify64` itself into `jsp_classify.h` as a
+`static inline` dispatcher over `jsp_classify64_neon` / `_avx2` / `_scalar` —
+the four-way `#if` that used to live in `src/classify.c`. That inlines the
+dispatch into every caller, `jsp_run`'s loop included, and a caller now holds
+a direct call to whichever arch-specific function it resolved to, rather than
+a call to a dispatcher that itself calls that function.
 
-LTO also leaves the intrinsics in one file per architecture, which the
-portability tiers above require. Moving the classifier into the loop's own
-file would buy the same inlining and break that row.
+The three arch-specific functions stay exactly where the portability tiers
+above put them, one per file, each built only under its own architecture.
+`jsp_classify.h` gained a `static inline` wrapper, not their bodies, so it
+still needs no `arm_neon.h` or `immintrin.h` of its own. M2's nibble table is
+worth measuring against this inlined dispatch, not a version that still pays
+for a call per block.
 
 ### M2 — String Mask
 
