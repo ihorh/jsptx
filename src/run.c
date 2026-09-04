@@ -83,6 +83,83 @@ static int process_block(int out_fd, uint64_t offset, jsp_block block, bool mask
     return emit_block(out_fd, offset, block, mask, masks);
 }
 
+typedef enum {
+    JSP_READER_BLOCK, /* block holds the next block, full or the trailing partial one */
+    JSP_READER_END,   /* the stream is exhausted; no block follows */
+    JSP_READER_ERROR, /* read(2) failed; errno is set */
+} jsp_reader_status;
+
+/* Turns a byte stream into a sequence of blocks. buf must hold cap + JSP_PAD
+   bytes, cap a multiple of JSP_BLOCK: the pad is where a trailing partial
+   block gets padded, past the real bytes read into it. */
+typedef struct {
+    int      fd;
+    uint8_t *buf;
+    size_t   cap;
+    size_t   fill; /* valid bytes at buf[0..fill) */
+    size_t   pos;  /* of those, already handed out as blocks; buf[pos..fill) remains */
+    bool     done; /* the trailing partial block, if any, has already been returned */
+} jsp_reader;
+
+static void jsp_reader_init(jsp_reader *r, int fd, uint8_t *buf, size_t cap) {
+    r->fd = fd;
+    r->buf = buf;
+    r->cap = cap;
+    r->fill = 0;
+    r->pos = 0;
+    r->done = false;
+}
+
+/* Fills *block with the next block and reports which of the three ways the
+   stream answered. Never yields a zero-length block: a stream ending on a
+   block boundary goes straight to JSP_READER_END rather than one more,
+   empty, block. */
+static jsp_reader_status jsp_reader_next(jsp_reader *r, jsp_block *block) {
+    if (r->done) {
+        return JSP_READER_END;
+    }
+
+    if (r->pos + JSP_BLOCK <= r->fill) {
+        *block = jsp_block_make(r->buf + r->pos, JSP_BLOCK);
+        r->pos += JSP_BLOCK;
+        return JSP_READER_BLOCK;
+    }
+
+    size_t remainder = r->fill - r->pos;
+    if (remainder > 0) {
+        memmove(r->buf, r->buf + r->pos, remainder);
+    }
+    r->fill = remainder;
+    r->pos = 0;
+
+    for (;;) {
+        ssize_t n = read(r->fd, r->buf + r->fill, r->cap - r->fill);
+        /* clang-format off */
+        if (n < 0 && errno == EINTR) { continue; }           /* interrupted, retry */
+        if (n < 0)                   { return JSP_READER_ERROR; } /* real read error */
+        /* clang-format on */
+
+        if (n == 0) {
+            r->done = true;
+            if (r->fill == 0) {
+                return JSP_READER_END;
+            }
+            /* A space is not structural, so padding with it reports nothing. */
+            memset(r->buf + r->fill, 0x20, JSP_BLOCK - r->fill);
+            *block = jsp_block_make(r->buf, (unsigned)r->fill);
+            r->pos = r->fill;
+            return JSP_READER_BLOCK;
+        }
+
+        r->fill += (size_t)n;
+        if (r->fill >= JSP_BLOCK) {
+            *block = jsp_block_make(r->buf, JSP_BLOCK);
+            r->pos = JSP_BLOCK;
+            return JSP_READER_BLOCK;
+        }
+    }
+}
+
 int jsp_run(int in_fd, int out_fd, size_t buf_size, bool masks) {
     size_t   cap = round_up_block(buf_size);
     uint8_t *buf = malloc(cap + JSP_PAD);
@@ -90,50 +167,27 @@ int jsp_run(int in_fd, int out_fd, size_t buf_size, bool masks) {
         return -1;
     }
 
-    size_t   pending = 0; /* bytes at buf[0..pending), carried over; always < JSP_BLOCK */
-    uint64_t blocks_consumed = 0;
+    jsp_reader reader;
+    jsp_reader_init(&reader, in_fd, buf, cap);
+
+    uint64_t offset = 0;
     int      result = 0;
 
     for (;;) {
-        ssize_t n = read(in_fd, buf + pending, cap - pending);
-        /* clang-format off */
-        if (n < 0 && errno == EINTR) { continue; }              /* interrupted, retry */
-        if (n < 0)                   { result = -1; break; }    /* real read error */
-        /* clang-format on */
-
-        if (n == 0) {
-            /* End of file: pending bytes are the final, partial block. A
-               space is not structural, so padding with it reports nothing. */
-            if (pending > 0) {
-                memset(buf + pending, 0x20, JSP_BLOCK - pending);
-                jsp_block block = jsp_block_make(buf, (unsigned)pending);
-                if (process_block(out_fd, blocks_consumed * JSP_BLOCK, block, masks) != 0) {
-                    result = -1;
-                }
-            }
+        jsp_block         block;
+        jsp_reader_status status = jsp_reader_next(&reader, &block);
+        if (status == JSP_READER_END) {
             break;
         }
-
-        size_t total = pending + (size_t)n;
-        size_t nblocks = total / JSP_BLOCK;
-        for (size_t b = 0; b < nblocks; b++) {
-            jsp_block block = jsp_block_make(buf + b * JSP_BLOCK, JSP_BLOCK);
-            uint64_t  offset = (blocks_consumed + b) * JSP_BLOCK;
-            if (process_block(out_fd, offset, block, masks) != 0) {
-                result = -1;
-                break;
-            }
-        }
-        if (result != 0) {
+        if (status == JSP_READER_ERROR) {
+            result = -1;
             break;
         }
-
-        size_t consumed = nblocks * JSP_BLOCK;
-        pending = total - consumed;
-        if (pending > 0) {
-            memmove(buf, buf + consumed, pending);
+        if (process_block(out_fd, offset, block, masks) != 0) {
+            result = -1;
+            break;
         }
-        blocks_consumed += nblocks;
+        offset += JSP_BLOCK;
     }
 
     free(buf);
