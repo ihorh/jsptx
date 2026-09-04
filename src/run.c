@@ -89,6 +89,12 @@ typedef enum {
     JSP_READER_ERROR, /* read(2) failed; errno is set */
 } jsp_reader_status;
 
+/* block is meaningful only when status is JSP_READER_BLOCK. */
+typedef struct {
+    jsp_reader_status status;
+    jsp_block         block;
+} jsp_reader_result;
+
 /* Turns a byte stream into a sequence of blocks. buf must hold cap + JSP_PAD
    bytes, cap a multiple of JSP_BLOCK: the pad is where a trailing partial
    block gets padded, past the real bytes read into it. */
@@ -110,19 +116,19 @@ static void jsp_reader_init(jsp_reader *r, int fd, uint8_t *buf, size_t cap) {
     r->done = false;
 }
 
-/* Fills *block with the next block and reports which of the three ways the
-   stream answered. Never yields a zero-length block: a stream ending on a
-   block boundary goes straight to JSP_READER_END rather than one more,
-   empty, block. */
-static jsp_reader_status jsp_reader_next(jsp_reader *r, jsp_block *block) {
+/* Reports which of the three ways the stream answered, with the next block
+   when it answered with one. Never yields a zero-length block: a stream
+   ending on a block boundary goes straight to JSP_READER_END rather than one
+   more, empty, block. */
+static jsp_reader_result jsp_reader_next(jsp_reader *r) {
     if (r->done) {
-        return JSP_READER_END;
+        return (jsp_reader_result){.status = JSP_READER_END};
     }
 
     if (r->pos + JSP_BLOCK <= r->fill) {
-        *block = jsp_block_make(r->buf + r->pos, JSP_BLOCK);
+        jsp_block block = jsp_block_make(r->buf + r->pos, JSP_BLOCK);
         r->pos += JSP_BLOCK;
-        return JSP_READER_BLOCK;
+        return (jsp_reader_result){.status = JSP_READER_BLOCK, .block = block};
     }
 
     size_t remainder = r->fill - r->pos;
@@ -135,27 +141,26 @@ static jsp_reader_status jsp_reader_next(jsp_reader *r, jsp_block *block) {
     for (;;) {
         ssize_t n = read(r->fd, r->buf + r->fill, r->cap - r->fill);
         /* clang-format off */
-        if (n < 0 && errno == EINTR) { continue; }           /* interrupted, retry */
-        if (n < 0)                   { return JSP_READER_ERROR; } /* real read error */
+        if (n < 0 && errno == EINTR) { continue; }  /* interrupted, retry */
+        if (n < 0)                  { return (jsp_reader_result){.status = JSP_READER_ERROR}; }
         /* clang-format on */
-
         if (n == 0) {
             r->done = true;
             if (r->fill == 0) {
-                return JSP_READER_END;
+                return (jsp_reader_result){.status = JSP_READER_END};
             }
             /* A space is not structural, so padding with it reports nothing. */
             memset(r->buf + r->fill, 0x20, JSP_BLOCK - r->fill);
-            *block = jsp_block_make(r->buf, (unsigned)r->fill);
+            jsp_block block = jsp_block_make(r->buf, (unsigned)r->fill);
             r->pos = r->fill;
-            return JSP_READER_BLOCK;
+            return (jsp_reader_result){.status = JSP_READER_BLOCK, .block = block};
         }
 
         r->fill += (size_t)n;
         if (r->fill >= JSP_BLOCK) {
-            *block = jsp_block_make(r->buf, JSP_BLOCK);
+            jsp_block block = jsp_block_make(r->buf, JSP_BLOCK);
             r->pos = JSP_BLOCK;
-            return JSP_READER_BLOCK;
+            return (jsp_reader_result){.status = JSP_READER_BLOCK, .block = block};
         }
     }
 }
@@ -169,21 +174,16 @@ int jsp_run(int in_fd, int out_fd, size_t buf_size, bool masks) {
 
     jsp_reader reader;
     jsp_reader_init(&reader, in_fd, buf, cap);
-
     uint64_t offset = 0;
     int      result = 0;
 
     for (;;) {
-        jsp_block         block;
-        jsp_reader_status status = jsp_reader_next(&reader, &block);
-        if (status == JSP_READER_END) {
-            break;
-        }
-        if (status == JSP_READER_ERROR) {
-            result = -1;
-            break;
-        }
-        if (process_block(out_fd, offset, block, masks) != 0) {
+        jsp_reader_result next = jsp_reader_next(&reader);
+        /* clang-format off */
+        if (next.status == JSP_READER_END)      { break; }
+        if (next.status == JSP_READER_ERROR)    { result = -1; break; }
+        /* clang-format on */
+        if (process_block(out_fd, offset, next.block, masks) != 0) {
             result = -1;
             break;
         }
