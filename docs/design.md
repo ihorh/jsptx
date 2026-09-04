@@ -57,7 +57,11 @@ extractions. A scalar version implements it for every other target.
 Everything downstream is portable C99: the tail mask, the bit iteration through
 `__builtin_ctzll`, the offset arithmetic, and the refill.
 
-### The Index Stream Is the Contract, the Mask Is a Detail
+### The Offset Stream Is Stable, the Mask Is Not
+
+Pass one's output is an index. Both text streams below observe that index, and
+neither is the product's output. Pass two consumes the index in memory, so
+nothing downstream ever parses these lines.
 
 Default output is one line per structural character:
 
@@ -131,7 +135,25 @@ pipe can.
 test`, so this needs no build wiring. Shell tests against the installed binary
 may follow later, once the command-line surface is worth testing as a surface.
 
+### An Eventuality Binds, an Ephemeral Thing Expires
+
+This document states where the design lands. A claim about the end state binds.
+Scaffolding that stands in for an unbuilt part expires instead, and a later
+milestone retires it.
+
+Building on something ephemeral is fine while its nature stays in view. The
+tests are the working example. They assert against text that pass two will never
+read, and they earn their keep until pass one exposes its index as data.
+
+The failure is citing an expired claim as settled. Before a decision in this
+section closes an argument, ask whether it survives the next milestone.
+
 ## The Milestones
+
+Two concerns sit outside this sequence: where debug output goes, and how the
+source splits into core and trace. Neither blocks a milestone. Each lands
+opportunistically, between milestones or inside one whose work already touches
+those files.
 
 ### M0 — Echo
 
