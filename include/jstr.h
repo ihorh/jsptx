@@ -46,4 +46,10 @@ static inline _Bool jstr_starts_with(jstr s, jstr prefix) {
     return s.len >= prefix.len && memcmp(s.data, prefix.data, (size_t)prefix.len) == 0;
 }
 
+/* Whether a and b hold the same bytes, length included. Not in upstream
+   jstring; added here because jsptx's flag parsing needs it. */
+static inline _Bool jstr_equal(jstr a, jstr b) {
+    return a.len == b.len && memcmp(a.data, b.data, (size_t)a.len) == 0;
+}
+
 #endif /* JSTR_H */
