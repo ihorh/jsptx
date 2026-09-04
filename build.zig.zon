@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .jzbuild = .{
-            .url = "git+https://github.com/ihorh/jzbuild#e0b8998cc324084768e58d01bfc1ced61c14f4ab",
-            .hash = "jzbuild-0.0.0-LUXUxS1uAACvwLSUxVAC0iAJW-Ycoypt0ChrGN8dEkTp",
+            .url = "git+https://github.com/ihorh/jzbuild#75162c9908f3da3d08b81139f1ca4a1fefa50783",
+            .hash = "jzbuild-0.0.0-LUXUxWZwAAD_5luZSo07_CnglCgYzPKVjnZhe8Kv3iFs",
         },
     },
     .paths = .{
