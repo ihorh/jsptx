@@ -1,4 +1,4 @@
-#include "jsp_classify.h"
+#include "jsp_classify.h" // IWYU pragma: keep
 
 #if defined(__ARM_NEON)
 
@@ -7,27 +7,27 @@
 #include <arm_neon.h>
 
 /* NEON has no movemask instruction. This is the standard substitute: weight
-   each lane by its bit position within its own byte (twice, once per 8-lane
-   half), then pairwise-add each half down to a single byte, since a lane
-   holding 0xff or 0x00 contributes its own bit or nothing to that sum. */
+   each lane by its bit position within its own byte, the weights repeating
+   every 8 lanes so the low group (0-7) and high group (8-15) each fold to
+   an independent byte, since a lane holding 0xff or 0x00 contributes its
+   own bit or nothing to that sum. Three rounds of a whole-register pairwise
+   add (16 lanes -> 8 -> 4 -> 2 meaningful values, each duplicated across
+   the register) leave the low group's total in lane 0 and the high group's
+   in lane 1. */
 static uint16_t movemask16(uint8x16_t v) {
     static const uint8_t bit_weights[16] = {
         0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80,
         0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80,
     };
     uint8x16_t weighted = vandq_u8(v, vld1q_u8(bit_weights));
-
-    uint8x8_t low = vget_low_u8(weighted);
-    low = vpadd_u8(low, low);
-    low = vpadd_u8(low, low);
-    low = vpadd_u8(low, low);
-
-    uint8x8_t high = vget_high_u8(weighted);
-    high = vpadd_u8(high, high);
-    high = vpadd_u8(high, high);
-    high = vpadd_u8(high, high);
-
-    return (uint16_t)(((uint16_t)vget_lane_u8(high, 0) << 8) | vget_lane_u8(low, 0));
+    /* series of pairwise addition: w[0] + w[1] -> w[0],w[8]  ... w[14] + w[15] -> w[7],w[15] */
+    weighted = vpaddq_u8(weighted, weighted);
+    weighted = vpaddq_u8(weighted, weighted);
+    weighted = vpaddq_u8(weighted, weighted);
+    /* extracting single u16 can be tricky because of endiannes on some platforms. */
+    uint16_t hi = vgetq_lane_u8(weighted, 1);
+    uint16_t lo = vgetq_lane_u8(weighted, 0);
+    return (uint16_t)(hi << 8) | lo;
 }
 
 /* One character's compare-and-accumulate step. */
