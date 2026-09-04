@@ -1,12 +1,14 @@
 #ifndef JSP_SETTINGS_H
 #define JSP_SETTINGS_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
-/* Everything the app can be configured with, cli-supplied or defaulted alike.
-   One field for now: buf_size. */
+/* Everything the app can be configured with, cli-supplied or defaulted
+   alike. */
 typedef struct {
     size_t buf_size;
+    bool   masks;
 } jsp_settings;
 
 /* Parses argv[1..argc) into a jsp_settings, filling in defaults for anything

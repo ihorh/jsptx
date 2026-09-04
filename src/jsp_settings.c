@@ -40,13 +40,16 @@ static size_t parse_buf_size(jstr value) {
 }
 
 jsp_settings jsp_settings_parse(int argc, char **argv) {
-    jsp_settings settings = {.buf_size = JSP_DEFAULT_BUF_SIZE};
+    jsp_settings settings = {.buf_size = JSP_DEFAULT_BUF_SIZE, .masks = false};
     jstr         prefix = JSTR("--buf-size=");
+    jstr         masks_flag = JSTR("--masks");
 
     for (int i = 1; i < argc; i++) {
         jstr arg = jstr_init(argv[i]);
         if (jstr_starts_with(arg, prefix)) {
             settings.buf_size = parse_buf_size(jstr_after(arg, prefix.len));
+        } else if (jstr_equal(arg, masks_flag)) {
+            settings.masks = true;
         } else {
             fprintf(stderr, "jsptx: unrecognized argument: %s\n", argv[i]);
             exit(1);
