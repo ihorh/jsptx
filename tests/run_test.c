@@ -187,7 +187,8 @@ run_case(const uint8_t *input, size_t input_len, size_t chunk, size_t buf_size, 
     jsp_test_writer w = spawn_writer(input, input_len, chunk);
     int             out_fd = open_sink();
 
-    assert(jsp_run(w.read_fd, out_fd, buf_size, masks) == 0);
+    assert(jsp_run(w.read_fd, out_fd, buf_size,
+                   masks ? JSP_OUTPUT_MASKS : JSP_OUTPUT_OFFSETS) == 0);
     close(w.read_fd);
     reap_writer(w.pid);
 

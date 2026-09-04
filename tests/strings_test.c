@@ -115,7 +115,7 @@ static void run_fixture(const char *name, size_t buf_size) {
     close(in_pipe[1]);
 
     int out_fd = open_sink();
-    assert(jsp_run(in_pipe[0], out_fd, buf_size, false) == 0);
+    assert(jsp_run(in_pipe[0], out_fd, buf_size, JSP_OUTPUT_OFFSETS) == 0);
     close(in_pipe[0]);
 
     int status;
@@ -131,14 +131,10 @@ static void run_fixture(const char *name, size_t buf_size) {
     close(out_fd);
 
     if ((size_t)got_size != want_len || memcmp(got, want, want_len) != 0) {
-        fprintf(
-            stderr, "strings/%s at buf_size=%zu: got %jd bytes, want %zu\n", name, buf_size,
-            (intmax_t)got_size, want_len
-        );
-        fprintf(
-            stderr, "--- got ---\n%.*s--- want ---\n%.*s", (int)got_size, got, (int)want_len,
-            want
-        );
+        fprintf(stderr, "strings/%s at buf_size=%zu: got %jd bytes, want %zu\n", name, buf_size,
+                (intmax_t)got_size, want_len);
+        fprintf(stderr, "--- got ---\n%.*s--- want ---\n%.*s", (int)got_size, got,
+                (int)want_len, want);
         abort();
     }
 

@@ -66,8 +66,19 @@ static int emit_mask(int out_fd, uint64_t offset, uint64_t mask) {
     return write_all(out_fd, (unsigned char *)line, (size_t)len);
 }
 
-static int emit_block(int out_fd, uint64_t offset, jsp_block block, uint64_t mask, bool masks) {
-    return masks ? emit_mask(out_fd, offset, mask) : emit_offsets(out_fd, offset, block, mask);
+/* Sink writes nothing: the point is measuring classification and string
+   masking apart from the cost of formatting and writing a result. */
+static int
+emit_block(int out_fd, uint64_t offset, jsp_block block, uint64_t mask, jsp_output_mode mode) {
+    switch (mode) {
+    case JSP_OUTPUT_MASKS:
+        return emit_mask(out_fd, offset, mask);
+    case JSP_OUTPUT_SINK:
+        return 0;
+    case JSP_OUTPUT_OFFSETS:
+    default:
+        return emit_offsets(out_fd, offset, block, mask);
+    }
 }
 
 /* Classifies one block, turns off structural recognition inside strings, and
@@ -77,7 +88,7 @@ static int emit_block(int out_fd, uint64_t offset, jsp_block block, uint64_t mas
    string_state carries in_string and in_backslash_run across calls, one call
    per block in stream order, padding included, since jsp_string_mask reads
    every byte of block.bytes regardless of len. */
-static int process_block(int out_fd, uint64_t offset, jsp_block block, bool masks,
+static int process_block(int out_fd, uint64_t offset, jsp_block block, jsp_output_mode mode,
                          jsp_string_state *string_state) {
     assert(block.len >= 1 && block.len <= JSP_BLOCK);
     uint64_t mask = jsp_classify64(block.bytes);
@@ -85,7 +96,7 @@ static int process_block(int out_fd, uint64_t offset, jsp_block block, bool mask
     if (block.len != JSP_BLOCK) {
         mask &= ~(uint64_t)0 >> (JSP_BLOCK - block.len);
     }
-    return emit_block(out_fd, offset, block, mask, masks);
+    return emit_block(out_fd, offset, block, mask, mode);
 }
 
 typedef enum {
@@ -170,7 +181,7 @@ static jsp_reader_result jsp_reader_next(jsp_reader *r) {
     }
 }
 
-int jsp_run(int in_fd, int out_fd, size_t buf_size, bool masks) {
+int jsp_run(int in_fd, int out_fd, size_t buf_size, jsp_output_mode mode) {
     size_t   cap = round_up_block(buf_size);
     uint8_t *buf = malloc(cap + JSP_PAD);
     if (buf == NULL) {
@@ -191,7 +202,7 @@ int jsp_run(int in_fd, int out_fd, size_t buf_size, bool masks) {
         if (next.status == JSP_READER_END)      { break; }
         if (next.status == JSP_READER_ERROR)    { result = -1; break; }
         /* clang-format on */
-        if (process_block(out_fd, offset, next.block, masks, &string_state) != 0) {
+        if (process_block(out_fd, offset, next.block, mode, &string_state) != 0) {
             result = -1;
             break;
         }
