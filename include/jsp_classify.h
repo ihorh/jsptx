@@ -15,6 +15,14 @@ uint64_t jsp_classify64_scalar(const uint8_t *p);
 uint64_t jsp_classify64_neon(const uint8_t *p);
 #endif
 
+#if defined(__AVX2__)
+/* AVX2 implementation of the same contract as jsp_classify64_scalar, built
+   from two 32-byte loads and two _mm256_movemask_epi8 calls. Declared only
+   when __AVX2__ is defined, since immintrin.h belongs to the compiler
+   rather than to a standard. */
+uint64_t jsp_classify64_avx2(const uint8_t *p);
+#endif
+
 /* Dispatches to the fastest classifier available for this build: a SIMD
    implementation when the target architecture has one, otherwise the scalar
    version. -Dclassify=scalar forces the scalar version instead, bypassing
