@@ -1,4 +1,4 @@
-#include "jsp_classify.h"
+#include "jsp_classify.h" // IWYU pragma: keep
 
 #if defined(__AVX2__)
 
