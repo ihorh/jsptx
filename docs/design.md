@@ -1,25 +1,29 @@
-# jsptx — Design and Milestones
+# jsptx — Design
 
 `jsptx` finds the structure in a JSON byte stream using SIMD, one 64-byte block
 at a time. It reads standard input, and it emits the byte offset of every
 character that carries structure.
 
-This document records what the design settled on and why, and it splits the
-work into four milestones. Each milestone is a branch. `docs/brainstorm.md`
+This document records what the design settled on and why. `docs/brainstorm.md`
 holds the earlier exploration that led here, including options this document
-rejects.
+rejects. `docs/plucker.md` plans the first user-facing command on top of what
+is settled here.
 
 The tool was called `jxs` in that brainstorm. It is `jsptx` everywhere now.
 
 ## What jsptx Is, and Is Not
 
-The end goal is a streaming JSON tool that beats `jq` on throughput and on
-memory. That tool needs a parser, and the parser starts with the pass that finds
-structure. These four milestones build that pass and stop there.
+`jsptx` beats `jq` on usability. That is the thesis this project tests.
+Performance is a non-functional requirement beside it, comparable or faster
+than `jq` rather than the goal itself.
 
-These milestones stop at offsets. Reading numbers, unescaping strings, and
-building a tree all sit past that boundary, and so do the expression language
-and the output writer.
+A streaming JSON tool needs a parser, and the parser starts with the pass
+that finds structure. `git log` and the per-milestone notes under
+`.claude-notes/` describe how that pass got built more accurately than a plan
+written before the work started would. The classifier reaches from a raw
+byte stream to structural offsets; reading numbers, unescaping strings, and
+building a tree all sit past that boundary, and so does the expression
+language and the output writer.
 
 ## Decisions That Bind
 
@@ -147,167 +151,6 @@ read, and they earn their keep until pass one exposes its index as data.
 
 The failure is citing an expired claim as settled. Before a decision in this
 section closes an argument, ask whether it survives the next milestone.
-
-## The Milestones
-
-Two concerns sit outside this sequence: where debug output goes, and how the
-source splits into core and trace. Neither blocks a milestone. Each lands
-opportunistically, between milestones or inside one whose work already touches
-those files.
-
-### M0 — Echo
-
-Read standard input and write it to standard output, byte for byte. There is no
-JSON in this milestone. It exists because the read loop, the write loop, and the
-test harness are the floor everything else stands on.
-
-The work:
-
-- A single buffer allocation, its capacity a multiple of 64, plus 64 bytes of
-  padding that later milestones fill.
-- A read loop that treats a return of 0 as end of file, retries on `EINTR`, and
-  treats a short read as ordinary rather than as the end.
-- A write loop, because `write(2)` on a pipe also returns short and must be
-  resumed.
-- `--buf-size=N`, which the tests use to force the loop into its edge cases.
-
-Accepted when the echo is byte-identical across four inputs: empty, one byte,
-larger than the buffer, and delivered in one-byte pipe writes.
-
-Block consumption and the carried remainder arrive in M1, because M0 has nothing
-that consumes a block.
-
-### M1 — Structural Index
-
-Classify `{`, `}`, `[`, `]`, `:`, `,`, and `"` in 64-byte blocks, and emit the
-absolute offset of each one.
-
-The work:
-
-- `jsp_classify64` in three implementations: AVX2, NEON, and scalar.
-- The scalar version is also the test oracle. On random input the SIMD result
-  must equal the scalar result, which is the cheapest real confidence available
-  and it costs one test.
-- Block consumption, then a `memmove` of the sub-block remainder to offset 0,
-  then a read in behind it.
-- The end-of-file tail, the one partial block per run. Pad it with `0x20`,
-  classify it, then clear the mask bits past the real length.
-- Bit iteration with `__builtin_ctzll`, and the `<offset>\t<char>` output.
-- `--masks`.
-
-Accepted when three comparisons match. arm64 must equal x86-64. Buffer sizes 64,
-65, 4096, and 1 MiB must all agree. The scalar and SIMD classifiers must agree
-on random bytes.
-
-M1 is wrong on purpose for any structural character inside a string, so
-`{"url":"http://x{y}"}` reports braces that carry no structure. Those fixtures
-live in `tests/data/strings/`, M1 does not run them, and M2 must pass them.
-
-An invalid document such as `{"a":}` produces a correct index stream, because
-this pass validates nothing. An invalid fixture at M1 asserts only that the
-program survives it and reports the right offsets.
-
-### M1a — Block Iteration
-
-An intermediate milestone between M1 and M2. It changes no output. It reshapes
-the loop that M2 and M3 both extend, before either one grows into it.
-
-The work:
-
-- `jsp_block`, a borrowed view over one block: a pointer and a length, and
-  nothing else. The stream offset stays a parameter, because a block is what
-  the bytes are rather than where they came from.
-- One function that processes a block, partial or complete alike. A tail block
-  pads with `0x20` and carries a short length. Trimming its mask to that
-  length is the whole of what the partial case costs.
-- Iteration in terms of blocks rather than bytes. `jsp_run` asks a reader for
-  the next block and processes it. Today it instead counts the blocks a buffer
-  holds, walks them, moves the remainder to offset 0, and reads in behind it.
-
-Accepted when M1's own criteria still hold byte for byte. The same offsets at
-buffer sizes 64, 65, 4096, and 1 MiB, and on both architectures.
-
-#### The Reader Answers Three Ways, Not Two
-
-A reader that returns a boolean gives one answer for "the stream ended" and
-for "`read` failed". The failure then hides in the reader's state, where a
-caller may walk past it, and the symptom is a truncated index that reports
-success. Three answers cost one enum and remove that: a block, the end, and
-an error.
-
-The reader yields no zero-length block. A stream ending on a block boundary
-simply ends, and the tail case runs only when bytes remain.
-
-#### The Loop Shape Is Free, and the Call Is Not
-
-Measured at `-O2` on arm64, before this milestone, the block loop is ten
-instructions. Two of them are the loop counter, and clang unrolls none of it.
-A reader replaces those two with a compare against the fill mark, so the shape
-costs nothing.
-
-`jsp_classify64` cost more, for the same reason: it compiled to a `bl` inside
-that loop, once per block, because the classifier was its own translation
-unit. Fixed by moving `jsp_classify64` itself into `jsp_classify.h` as a
-`static inline` dispatcher over `jsp_classify64_neon` / `_avx2` / `_scalar` —
-the four-way `#if` that used to live in `src/classify.c`. That inlines the
-dispatch into every caller, `jsp_run`'s loop included, and a caller now holds
-a direct call to whichever arch-specific function it resolved to, rather than
-a call to a dispatcher that itself calls that function.
-
-The three arch-specific functions stay exactly where the portability tiers
-above put them, one per file, each built only under its own architecture.
-`jsp_classify.h` gained a `static inline` wrapper, not their bodies, so it
-still needs no `arm_neon.h` or `immintrin.h` of its own. M2's nibble table is
-worth measuring against this inlined dispatch, not a version that still pays
-for a call per block.
-
-### M2 — String Mask
-
-Turn off structural recognition inside strings, and make the `strings/`
-fixtures pass.
-
-The work:
-
-- The backslash mask, and the run-start parity that decides whether a quote is
-  real or escaped.
-- A prefix XOR over the real-quote mask, which yields the in-string mask. Six
-  shift-and-XOR steps on a `uint64_t` compute it, so the carry-less multiply
-  instruction is an optimization rather than a requirement.
-- The two bits that cross a block boundary, and cross a refill with it: still
-  inside a string, and whether the block's trailing run of backslashes left an
-  unpaired one, escaping into whatever byte comes next.
-- The structural mask becomes `structural & ~in_string`.
-- A sink mode that classifies and discards, because one line per structural
-  character emits more bytes than it reads, and a throughput number measured
-  through `printf` measures `printf`.
-- A benchmark, and then the nibble shuffle table. Seven compares and six ORs per
-  block become roughly four operations on both architectures, through
-  `_mm256_shuffle_epi8` and `vqtbl1q_u8`. The table lands with a measured
-  before and after, or it does not land.
-
-Accepted when the `strings/` fixtures pass, the cross-architecture and
-cross-buffer-size criteria from M1 still hold, and the benchmark reports a
-number from the sink mode.
-
-### M3 — Depth and Framing
-
-A scalar pass over the index stream that tracks nesting and finds record
-boundaries.
-
-The work:
-
-- The bit stack, `--max-depth` with a default of 64, and a word array above 64.
-- An error at the exact byte for a depth overrun, for a mismatched close
-  bracket, and for a close bracket arriving on an empty stack.
-- Depth returning to zero, which marks one complete top-level value. That is the
-  record boundary a streaming filter needs, and it is what makes concatenated
-  and newline-delimited JSON work without a special case.
-
-Accepted when nesting errors report the right byte, and when a stream of
-concatenated records reports the right boundaries.
-
-Still not validated here: numbers, literals, key uniqueness, UTF-8, and any
-grammar rule beyond bracket matching.
 
 ## Deferred, with Reasons
 
