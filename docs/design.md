@@ -274,7 +274,8 @@ The work:
   shift-and-XOR steps on a `uint64_t` compute it, so the carry-less multiply
   instruction is an optimization rather than a requirement.
 - The two bits that cross a block boundary, and cross a refill with it: still
-  inside a string, and still inside a backslash run.
+  inside a string, and whether the block's trailing run of backslashes left an
+  unpaired one, escaping into whatever byte comes next.
 - The structural mask becomes `structural & ~in_string`.
 - A sink mode that classifies and discards, because one line per structural
   character emits more bytes than it reads, and a throughput number measured
