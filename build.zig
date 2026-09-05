@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) void {
         .scalar => exe.root_module.addCMacro("JSP_FORCE_SCALAR", "1"),
     }
 
-    addBench(b, exe);
+    addBench(b, exe, classify);
 }
 
 /// jzbuild's app() wires src/, include/, and tests/ but has no bench/
@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) void {
 /// bench/*_bench.c, compiled against the app's own sources (minus main.c,
 /// same as a test binary), wired to a `bench` step. Measurement, not
 /// verification — never part of `test`.
-fn addBench(b: *std.Build, exe: *std.Build.Step.Compile) void {
+fn addBench(b: *std.Build, exe: *std.Build.Step.Compile, classify: Classify) void {
     const io = b.graph.io;
     var dir = b.build_root.handle.openDir(io, "bench", .{ .iterate = true }) catch return;
     defer dir.close(io);
@@ -46,6 +46,10 @@ fn addBench(b: *std.Build, exe: *std.Build.Step.Compile) void {
             }),
         });
         bench_exe.root_module.addIncludePath(b.path("include"));
+        switch (classify) {
+            .auto => {},
+            .scalar => bench_exe.root_module.addCMacro("JSP_FORCE_SCALAR", "1"),
+        }
         bench_exe.root_module.addCSourceFiles(.{ .files = sources });
         bench_exe.root_module.addCSourceFiles(.{ .files = &.{bench_src} });
         bench_step.dependOn(&b.addRunArtifact(bench_exe).step);
