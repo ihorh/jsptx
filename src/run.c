@@ -4,6 +4,8 @@
 
 #include "jsp_block.h"
 #include "jsp_classify.h"
+#include "jsp_io.h"
+#include "jsp_pluck.h"
 #include "jsp_string_mask.h"
 
 #include <assert.h>
@@ -28,21 +30,6 @@ static size_t round_up_block(size_t n) {
     return (n + JSP_BLOCK - 1) / JSP_BLOCK * JSP_BLOCK;
 }
 
-/* write(2) on a pipe returns short, same as read(2), so this resumes until
-   every byte is written or a real error stops it. */
-static int write_all(int fd, const unsigned char *buf, size_t len) {
-    size_t written = 0;
-    while (written < len) {
-        ssize_t n = write(fd, buf + written, len - written);
-        /* clang-format off */
-        if (n < 0 && errno == EINTR) { continue; }  /* interrupted, retry */
-        if (n < 0)                   { return -1; } /* real write error */
-        /* clang-format on */
-        written += (size_t)n;
-    }
-    return 0;
-}
-
 /* One line per set bit in mask: "<offset + bit>\t<block.bytes[bit]>\n". */
 static int emit_offsets(int out_fd, uint64_t offset, jsp_block block, uint64_t mask) {
     while (mask != 0) {
@@ -52,7 +39,7 @@ static int emit_offsets(int out_fd, uint64_t offset, jsp_block block, uint64_t m
         char line[32];
         int  len = snprintf(line, sizeof(line), "%" PRIu64 "\t%c\n", offset + (uint64_t)bit,
                             block.bytes[bit]);
-        if (write_all(out_fd, (unsigned char *)line, (size_t)len) != 0) {
+        if (jsp_write_all(out_fd, (unsigned char *)line, (size_t)len) != 0) {
             return -1;
         }
     }
@@ -63,7 +50,7 @@ static int emit_offsets(int out_fd, uint64_t offset, jsp_block block, uint64_t m
 static int emit_mask(int out_fd, uint64_t offset, uint64_t mask) {
     char line[40];
     int  len = snprintf(line, sizeof(line), "%" PRIu64 "\t%016" PRIx64 "\n", offset, mask);
-    return write_all(out_fd, (unsigned char *)line, (size_t)len);
+    return jsp_write_all(out_fd, (unsigned char *)line, (size_t)len);
 }
 
 /* Sink writes nothing: the point is measuring classification and string
@@ -89,12 +76,15 @@ emit_block(int out_fd, uint64_t offset, jsp_block block, uint64_t mask, jsp_outp
    per block in stream order, padding included, since jsp_string_mask reads
    every byte of block.bytes regardless of len. */
 static int process_block(int out_fd, uint64_t offset, jsp_block block, jsp_output_mode mode,
-                         jsp_string_state *string_state) {
+                         jsp_string_state *string_state, jsp_pluck_state *pluck_state) {
     assert(block.len >= 1 && block.len <= JSP_BLOCK);
     jsp_char_masks classified = jsp_classify_masks64(block.bytes);
     uint64_t       mask = jsp_filter_structural_mask(classified, string_state);
     if (block.len != JSP_BLOCK) {
         mask &= ~(uint64_t)0 >> (JSP_BLOCK - block.len);
+    }
+    if (mode == JSP_OUTPUT_PLUCK) {
+        return jsp_pluck_step(pluck_state, block, mask, out_fd);
     }
     return emit_block(out_fd, offset, block, mask, mode);
 }
@@ -195,6 +185,7 @@ int jsp_run(int in_fd, int out_fd, size_t buf_size, jsp_output_mode mode) {
     int      result = 0;
 
     jsp_string_state string_state = {0};
+    jsp_pluck_state  pluck_state = {0};
 
     for (;;) {
         jsp_reader_result next = jsp_reader_next(&reader);
@@ -202,11 +193,15 @@ int jsp_run(int in_fd, int out_fd, size_t buf_size, jsp_output_mode mode) {
         if (next.status == JSP_READER_END)      { break; }
         if (next.status == JSP_READER_ERROR)    { result = -1; break; }
         /* clang-format on */
-        if (process_block(out_fd, offset, next.block, mode, &string_state) != 0) {
+        if (process_block(out_fd, offset, next.block, mode, &string_state, &pluck_state) != 0) {
             result = -1;
             break;
         }
         offset += JSP_BLOCK;
+    }
+
+    if (result == 0 && mode == JSP_OUTPUT_PLUCK) {
+        result = jsp_pluck_finish(&pluck_state, out_fd);
     }
 
     free(buf);
