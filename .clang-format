@@ -8,4 +8,3 @@ AlignConsecutiveDeclarations: true
 PenaltyReturnTypeOnItsOwnLine: 16
 InsertNewlineAtEOF: true
 AlwaysBreakBeforeMultilineStrings: true
-AlignAfterOpenBracket: BlockIndent

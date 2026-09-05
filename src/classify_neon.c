@@ -2,7 +2,7 @@
 
 #if defined(__ARM_NEON)
 
-#include "jsp_structural_chars.h"
+#include "jsp_classify_tables.h"
 
 #include <arm_neon.h>
 
@@ -30,31 +30,35 @@ static uint16_t movemask16(uint8x16_t v) {
     return (uint16_t)(hi << 8) | lo;
 }
 
-/* One character's compare-and-accumulate step. */
-static inline uint8x16_t merge_eq(uint8x16_t hit, uint8x16_t v, uint8_t ch) {
-    uint8x16_t target = vdupq_n_u8(ch);  /* dup: broadcast `ch` to all 16 lanes */
-    uint8x16_t eq = vceqq_u8(v, target); /* eq: 0xff per lane where v[i] == ch, else 0x00 */
-    return vorrq_u8(hit, eq);            /* or: fold this character's matches into hit */
+/* Per-lane tag byte: bit i set iff this byte is exactly the character bit i
+   is assigned to in jsp_classify_tables.h, 0 if it's none of the eight. */
+static uint8x16_t classify_tag16(const uint8_t *p) {
+    uint8x16_t v = vld1q_u8(p);
+    uint8x16_t low_nibble = vandq_u8(v, vdupq_n_u8(0x0F));
+    uint8x16_t high_nibble = vshrq_n_u8(v, 4);
+    uint8x16_t low_hit = vqtbl1q_u8(vld1q_u8(JSP_LOW_NIBBLE_TABLE), low_nibble);
+    uint8x16_t high_hit = vqtbl1q_u8(vld1q_u8(JSP_HIGH_NIBBLE_TABLE), high_nibble);
+    return vandq_u8(low_hit, high_hit);
 }
 
-/* Classifies one 16-byte lane: a bitmask whose bit i is set when p[i] is one
-   of the seven structural characters, built from one equality compare per
-   character, ORed together, then reduced to 16 bits by movemask16. */
-static uint16_t classify16(const uint8_t *p) {
-    uint8x16_t v = vld1q_u8(p);     /* ld: load 16 octets into NEON vector register */
-    uint8x16_t hit = vdupq_n_u8(0); /* dup: initialize hit with all 0s */
-#define JSP_OR_EQ(ch) hit = merge_eq(hit, v, (ch));
-    JSP_STRUCTURAL_CHARS(JSP_OR_EQ)
-#undef JSP_OR_EQ
-    return movemask16(hit);
-}
+/* 0xff per lane where v is nonzero, 0x00 where it's zero — movemask16 needs a
+   proper per-lane boolean, not tag16's raw bit pattern, since it extracts a
+   bit via AND-with-weight rather than a true/false test. */
+static uint8x16_t is_nonzero16(uint8x16_t v) { return vmvnq_u8(vceqq_u8(v, vdupq_n_u8(0))); }
 
-uint64_t jsp_classify64_neon(const uint8_t *p) {
-    uint64_t mask = 0;
+jsp_char_masks jsp_classify_masks64_neon(const uint8_t *p) {
+    jsp_char_masks masks = {0, 0, 0};
     for (int lane = 0; lane < 4; lane++) {
-        mask |= (uint64_t)classify16(p + lane * 16) << (lane * 16);
+        uint8x16_t tag = classify_tag16(p + lane * 16);
+        uint8x16_t struct_hit = is_nonzero16(vandq_u8(tag, vdupq_n_u8(JSP_STRUCTURAL_BITS)));
+        uint8x16_t quote_hit = is_nonzero16(vandq_u8(tag, vdupq_n_u8(JSP_BIT_QUOTE)));
+        uint8x16_t backslash_hit = is_nonzero16(vandq_u8(tag, vdupq_n_u8(JSP_BIT_BACKSLASH)));
+        int        shift = lane * 16;
+        masks.structural |= (uint64_t)movemask16(struct_hit) << shift;
+        masks.quote |= (uint64_t)movemask16(quote_hit) << shift;
+        masks.backslash |= (uint64_t)movemask16(backslash_hit) << shift;
     }
-    return mask;
+    return masks;
 }
 
 #endif /* defined(__ARM_NEON) */

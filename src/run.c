@@ -4,6 +4,7 @@
 
 #include "jsp_block.h"
 #include "jsp_classify.h"
+#include "jsp_string_mask.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -49,9 +50,8 @@ static int emit_offsets(int out_fd, uint64_t offset, jsp_block block, uint64_t m
         mask &= mask - 1;
 
         char line[32];
-        int  len = snprintf(
-            line, sizeof(line), "%" PRIu64 "\t%c\n", offset + (uint64_t)bit, block.bytes[bit]
-        );
+        int  len = snprintf(line, sizeof(line), "%" PRIu64 "\t%c\n", offset + (uint64_t)bit,
+                            block.bytes[bit]);
         if (write_all(out_fd, (unsigned char *)line, (size_t)len) != 0) {
             return -1;
         }
@@ -66,21 +66,37 @@ static int emit_mask(int out_fd, uint64_t offset, uint64_t mask) {
     return write_all(out_fd, (unsigned char *)line, (size_t)len);
 }
 
-static int emit_block(int out_fd, uint64_t offset, jsp_block block, uint64_t mask, bool masks) {
-    return masks ? emit_mask(out_fd, offset, mask) : emit_offsets(out_fd, offset, block, mask);
+/* Sink writes nothing: the point is measuring classification and string
+   masking apart from the cost of formatting and writing a result. */
+static int
+emit_block(int out_fd, uint64_t offset, jsp_block block, uint64_t mask, jsp_output_mode mode) {
+    switch (mode) {
+    case JSP_OUTPUT_MASKS:
+        return emit_mask(out_fd, offset, mask);
+    case JSP_OUTPUT_SINK:
+        return 0;
+    case JSP_OUTPUT_OFFSETS:
+    default:
+        return emit_offsets(out_fd, offset, block, mask);
+    }
 }
 
-/* Classifies one block and emits the result, partial or complete alike. A
-   short block's mask is trimmed to its real bytes so the padding reports
-   nothing; the assert is what makes that shift defined, since 1 << len would
-   not be at len 64. */
-static int process_block(int out_fd, uint64_t offset, jsp_block block, bool masks) {
+/* Classifies one block, turns off structural recognition inside strings, and
+   emits the result, partial or complete alike. A short block's mask is
+   trimmed to its real bytes so the padding reports nothing; the assert is
+   what makes that shift defined, since 1 << len would not be at len 64.
+   string_state carries in_string and trailing_backslash_unpaired across calls, one call
+   per block in stream order, padding included, since jsp_string_mask reads
+   every byte of block.bytes regardless of len. */
+static int process_block(int out_fd, uint64_t offset, jsp_block block, jsp_output_mode mode,
+                         jsp_string_state *string_state) {
     assert(block.len >= 1 && block.len <= JSP_BLOCK);
-    uint64_t mask = jsp_classify64(block.bytes);
+    jsp_char_masks classified = jsp_classify_masks64(block.bytes);
+    uint64_t       mask = jsp_filter_structural_mask(classified, string_state);
     if (block.len != JSP_BLOCK) {
         mask &= ~(uint64_t)0 >> (JSP_BLOCK - block.len);
     }
-    return emit_block(out_fd, offset, block, mask, masks);
+    return emit_block(out_fd, offset, block, mask, mode);
 }
 
 typedef enum {
@@ -165,7 +181,7 @@ static jsp_reader_result jsp_reader_next(jsp_reader *r) {
     }
 }
 
-int jsp_run(int in_fd, int out_fd, size_t buf_size, bool masks) {
+int jsp_run(int in_fd, int out_fd, size_t buf_size, jsp_output_mode mode) {
     size_t   cap = round_up_block(buf_size);
     uint8_t *buf = malloc(cap + JSP_PAD);
     if (buf == NULL) {
@@ -174,8 +190,11 @@ int jsp_run(int in_fd, int out_fd, size_t buf_size, bool masks) {
 
     jsp_reader reader;
     jsp_reader_init(&reader, in_fd, buf, cap);
+
     uint64_t offset = 0;
     int      result = 0;
+
+    jsp_string_state string_state = {0};
 
     for (;;) {
         jsp_reader_result next = jsp_reader_next(&reader);
@@ -183,7 +202,7 @@ int jsp_run(int in_fd, int out_fd, size_t buf_size, bool masks) {
         if (next.status == JSP_READER_END)      { break; }
         if (next.status == JSP_READER_ERROR)    { result = -1; break; }
         /* clang-format on */
-        if (process_block(out_fd, offset, next.block, masks) != 0) {
+        if (process_block(out_fd, offset, next.block, mode, &string_state) != 0) {
             result = -1;
             break;
         }

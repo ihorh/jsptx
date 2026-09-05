@@ -187,7 +187,8 @@ run_case(const uint8_t *input, size_t input_len, size_t chunk, size_t buf_size, 
     jsp_test_writer w = spawn_writer(input, input_len, chunk);
     int             out_fd = open_sink();
 
-    assert(jsp_run(w.read_fd, out_fd, buf_size, masks) == 0);
+    assert(jsp_run(w.read_fd, out_fd, buf_size,
+                   masks ? JSP_OUTPUT_MASKS : JSP_OUTPUT_OFFSETS) == 0);
     close(w.read_fd);
     reap_writer(w.pid);
 
@@ -200,13 +201,16 @@ run_case(const uint8_t *input, size_t input_len, size_t chunk, size_t buf_size, 
 }
 
 /* A mix of structural and non-structural bytes, long enough to cross many
-   block boundaries at every buffer size under test. */
+   block boundaries at every buffer size under test. No '"' here: since M2,
+   jsp_run suppresses structural characters inside a string, and this
+   generator has no notion of string state to match that with. Quote and
+   string-boundary coverage lives in tests/data/strings/ instead. */
 static uint8_t *make_mixed(size_t len) {
-    static const char structural[] = "{}[]:,\"";
+    static const char structural[] = "{}[]:,";
     uint8_t          *buf = malloc(len ? len : 1);
     assert(buf != NULL);
     for (size_t i = 0; i < len; i++) {
-        /* One byte in five is structural, cycling through all seven kinds;
+        /* One byte in five is structural, cycling through all six kinds;
            the rest are ordinary ASCII that is never structural. */
         buf[i] = (i % 5 == 0) ? (uint8_t)structural[i % (sizeof(structural) - 1)]
                               : (uint8_t)('a' + (i % 26));
