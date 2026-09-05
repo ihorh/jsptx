@@ -117,7 +117,7 @@ static void run_fixture(const char *name, size_t buf_size) {
     close(in_pipe[1]);
 
     int out_fd = open_sink();
-    assert(jsp_run(in_pipe[0], out_fd, buf_size, JSP_OUTPUT_PLUCK) == 0);
+    assert(jsp_run(in_pipe[0], out_fd, buf_size, JSP_OUTPUT_PLUCK, -1, JSP_TRACE_NONE) == 0);
     close(in_pipe[0]);
 
     int status;
@@ -167,7 +167,7 @@ static void test_scalar_on_block_boundary(void) {
     close(in_pipe[1]);
 
     int out_fd = open_sink();
-    assert(jsp_run(in_pipe[0], out_fd, 64, JSP_OUTPUT_PLUCK) == 0);
+    assert(jsp_run(in_pipe[0], out_fd, 64, JSP_OUTPUT_PLUCK, -1, JSP_TRACE_NONE) == 0);
     close(in_pipe[0]);
 
     int status;
@@ -202,7 +202,7 @@ static void test_malformed_input_fails(void) {
     close(in_pipe[1]);
 
     int out_fd = open_sink();
-    assert(jsp_run(in_pipe[0], out_fd, 64, JSP_OUTPUT_PLUCK) == -1);
+    assert(jsp_run(in_pipe[0], out_fd, 64, JSP_OUTPUT_PLUCK, -1, JSP_TRACE_NONE) == -1);
     close(in_pipe[0]);
     close(out_fd);
 

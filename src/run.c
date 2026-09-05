@@ -53,40 +53,55 @@ static int emit_mask(int out_fd, uint64_t offset, uint64_t mask) {
     return jsp_write_all(out_fd, (unsigned char *)line, (size_t)len);
 }
 
-/* Sink writes nothing: the point is measuring classification and string
-   masking apart from the cost of formatting and writing a result. */
+/* trace's inspection stream for one block, to trace_fd: independent of
+   whatever mode is doing with the same block's mask on out_fd. */
 static int
-emit_block(int out_fd, uint64_t offset, jsp_block block, uint64_t mask, jsp_output_mode mode) {
-    switch (mode) {
-    case JSP_OUTPUT_MASKS:
-        return emit_mask(out_fd, offset, mask);
-    case JSP_OUTPUT_SINK:
-        return 0;
-    case JSP_OUTPUT_OFFSETS:
+emit_trace(int trace_fd, uint64_t offset, jsp_block block, uint64_t mask, jsp_trace_mode trace) {
+    switch (trace) {
+    case JSP_TRACE_OFFSETS:
+        return emit_offsets(trace_fd, offset, block, mask);
+    case JSP_TRACE_MASKS:
+        return emit_mask(trace_fd, offset, mask);
+    case JSP_TRACE_NONE:
     default:
-        return emit_offsets(out_fd, offset, block, mask);
+        return 0;
     }
 }
 
-/* Classifies one block, turns off structural recognition inside strings, and
-   emits the result, partial or complete alike. A short block's mask is
-   trimmed to its real bytes so the padding reports nothing; the assert is
-   what makes that shift defined, since 1 << len would not be at len 64.
+/* Classifies one block, turns off structural recognition inside strings,
+   traces the result to trace_fd, and hands it to mode's own output on
+   out_fd, partial or complete block alike. A short block's mask is trimmed
+   to its real bytes so the padding reports nothing; the assert is what
+   makes that shift defined, since 1 << len would not be at len 64.
    string_state carries in_string and trailing_backslash_unpaired across calls, one call
    per block in stream order, padding included, since jsp_string_mask reads
    every byte of block.bytes regardless of len. */
 static int process_block(int out_fd, uint64_t offset, jsp_block block, jsp_output_mode mode,
-                         jsp_string_state *string_state, jsp_pluck_state *pluck_state) {
+                         int trace_fd, jsp_trace_mode trace, jsp_string_state *string_state,
+                         jsp_pluck_state *pluck_state) {
     assert(block.len >= 1 && block.len <= JSP_BLOCK);
     jsp_char_masks classified = jsp_classify_masks64(block.bytes);
     uint64_t       mask = jsp_filter_structural_mask(classified, string_state);
     if (block.len != JSP_BLOCK) {
         mask &= ~(uint64_t)0 >> (JSP_BLOCK - block.len);
     }
+    if (emit_trace(trace_fd, offset, block, mask, trace) != 0) {
+        return -1;
+    }
     if (mode == JSP_OUTPUT_PLUCK) {
         return jsp_pluck_step(pluck_state, block, mask, out_fd);
     }
-    return emit_block(out_fd, offset, block, mask, mode);
+    return 0; /* JSP_OUTPUT_SINK: out_fd is never touched */
+}
+
+/* Closes whatever mode left in flight once the stream ends. Only
+   JSP_OUTPUT_PLUCK needs this, for a bare scalar record cut off with no
+   trailing whitespace or structural byte to end it; see jsp_pluck_finish. */
+static int process_finish(int out_fd, jsp_output_mode mode, jsp_pluck_state *pluck_state) {
+    if (mode == JSP_OUTPUT_PLUCK) {
+        return jsp_pluck_finish(pluck_state, out_fd);
+    }
+    return 0;
 }
 
 typedef enum {
@@ -171,7 +186,8 @@ static jsp_reader_result jsp_reader_next(jsp_reader *r) {
     }
 }
 
-int jsp_run(int in_fd, int out_fd, size_t buf_size, jsp_output_mode mode) {
+int jsp_run(int in_fd, int out_fd, size_t buf_size, jsp_output_mode mode, int trace_fd,
+            jsp_trace_mode trace) {
     size_t   cap = round_up_block(buf_size);
     uint8_t *buf = malloc(cap + JSP_PAD);
     if (buf == NULL) {
@@ -193,15 +209,16 @@ int jsp_run(int in_fd, int out_fd, size_t buf_size, jsp_output_mode mode) {
         if (next.status == JSP_READER_END)      { break; }
         if (next.status == JSP_READER_ERROR)    { result = -1; break; }
         /* clang-format on */
-        if (process_block(out_fd, offset, next.block, mode, &string_state, &pluck_state) != 0) {
+        if (process_block(out_fd, offset, next.block, mode, trace_fd, trace, &string_state,
+                          &pluck_state) != 0) {
             result = -1;
             break;
         }
         offset += JSP_BLOCK;
     }
 
-    if (result == 0 && mode == JSP_OUTPUT_PLUCK) {
-        result = jsp_pluck_finish(&pluck_state, out_fd);
+    if (result == 0) {
+        result = process_finish(out_fd, mode, &pluck_state);
     }
 
     free(buf);

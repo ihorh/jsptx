@@ -52,21 +52,42 @@ static jstr parse_path(jstr arg) {
     return arg;
 }
 
+static void print_usage(FILE *out) {
+    fprintf(out,
+            "Usage: jsptx [PATH] [OPTIONS]\n"
+            "\n"
+            "  Reads a JSON stream on stdin. With PATH, prints each record's matching\n"
+            "  value verbatim, one per line; \".\" matches the whole record and is the\n"
+            "  only path implemented so far. Without PATH, classifies the stream and\n"
+            "  discards the result.\n"
+            "\n"
+            "Options:\n"
+            "  --buf-size=N   read in chunks of N bytes (default %zu)\n"
+            "  --offsets      trace every structural character's offset to stderr\n"
+            "  --masks        trace each block's classification to stderr, as hex\n"
+            "  -h, --help     print this message and exit\n",
+            JSP_DEFAULT_BUF_SIZE);
+}
+
 jsp_settings jsp_settings_parse(int argc, char **argv) {
-    jsp_settings settings = {.buf_size = JSP_DEFAULT_BUF_SIZE, .output = JSP_OUTPUT_OFFSETS};
-    jstr         prefix = JSTR("--buf-size=");
-    jstr         masks_flag = JSTR("--masks");
-    jstr         sink_flag = JSTR("--sink");
-    bool         have_path = false;
+    jsp_settings settings = {
+        .buf_size = JSP_DEFAULT_BUF_SIZE, .output = JSP_OUTPUT_SINK, .trace = JSP_TRACE_NONE};
+    jstr prefix = JSTR("--buf-size=");
+    jstr offsets_flag = JSTR("--offsets");
+    jstr masks_flag = JSTR("--masks");
+    bool have_path = false;
 
     for (int i = 1; i < argc; i++) {
         jstr arg = jstr_init(argv[i]);
-        if (jstr_starts_with(arg, prefix)) {
+        if (jstr_equal(arg, JSTR("-h")) || jstr_equal(arg, JSTR("--help"))) {
+            print_usage(stdout);
+            exit(0);
+        } else if (jstr_starts_with(arg, prefix)) {
             settings.buf_size = parse_buf_size(jstr_after(arg, prefix.len));
+        } else if (jstr_equal(arg, offsets_flag)) {
+            settings.trace = JSP_TRACE_OFFSETS;
         } else if (jstr_equal(arg, masks_flag)) {
-            settings.output = JSP_OUTPUT_MASKS;
-        } else if (jstr_equal(arg, sink_flag)) {
-            settings.output = JSP_OUTPUT_SINK;
+            settings.trace = JSP_TRACE_MASKS;
         } else if (jstr_starts_with(arg, JSTR("--"))) {
             fprintf(stderr, "jsptx: unrecognized argument: %s\n", argv[i]);
             exit(1);

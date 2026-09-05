@@ -117,7 +117,7 @@ static void run_fixture(const char *name, size_t buf_size) {
     close(in_pipe[1]);
 
     int out_fd = open_sink();
-    assert(jsp_run(in_pipe[0], out_fd, buf_size, JSP_OUTPUT_OFFSETS) == 0);
+    assert(jsp_run(in_pipe[0], -1, buf_size, JSP_OUTPUT_SINK, out_fd, JSP_TRACE_OFFSETS) == 0);
     close(in_pipe[0]);
 
     int status;
