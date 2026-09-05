@@ -3,6 +3,7 @@
 #include "jstr.h"
 
 #include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -39,11 +40,24 @@ static size_t parse_buf_size(jstr value) {
     return (size_t)p.value;
 }
 
+/* The path grammar this stage understands: "." alone, standing for the
+   whole record. Segment splitting lands in pluck-path; until then, any
+   other path is a clear error rather than a silent partial match. */
+static jstr parse_path(jstr arg) {
+    if (!jstr_equal(arg, JSTR("."))) {
+        fprintf(stderr, "jsptx: unsupported path: %.*s (only \".\" is implemented so far)\n",
+                (int)arg.len, arg.data);
+        exit(1);
+    }
+    return arg;
+}
+
 jsp_settings jsp_settings_parse(int argc, char **argv) {
     jsp_settings settings = {.buf_size = JSP_DEFAULT_BUF_SIZE, .output = JSP_OUTPUT_OFFSETS};
     jstr         prefix = JSTR("--buf-size=");
     jstr         masks_flag = JSTR("--masks");
     jstr         sink_flag = JSTR("--sink");
+    bool         have_path = false;
 
     for (int i = 1; i < argc; i++) {
         jstr arg = jstr_init(argv[i]);
@@ -53,9 +67,16 @@ jsp_settings jsp_settings_parse(int argc, char **argv) {
             settings.output = JSP_OUTPUT_MASKS;
         } else if (jstr_equal(arg, sink_flag)) {
             settings.output = JSP_OUTPUT_SINK;
-        } else {
+        } else if (jstr_starts_with(arg, JSTR("--"))) {
             fprintf(stderr, "jsptx: unrecognized argument: %s\n", argv[i]);
             exit(1);
+        } else if (have_path) {
+            fprintf(stderr, "jsptx: only one path is supported, got a second: %s\n", argv[i]);
+            exit(1);
+        } else {
+            settings.path = parse_path(arg);
+            settings.output = JSP_OUTPUT_PLUCK;
+            have_path = true;
         }
     }
 
