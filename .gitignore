@@ -1,4 +1,5 @@
 build/
+*.o
 .vscode/
 compile_commands.json
 .zig-cache/

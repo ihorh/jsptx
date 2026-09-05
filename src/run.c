@@ -85,15 +85,14 @@ emit_block(int out_fd, uint64_t offset, jsp_block block, uint64_t mask, jsp_outp
    emits the result, partial or complete alike. A short block's mask is
    trimmed to its real bytes so the padding reports nothing; the assert is
    what makes that shift defined, since 1 << len would not be at len 64.
-   string_state carries in_string and in_backslash_run across calls, one call
+   string_state carries in_string and trailing_backslash_unpaired across calls, one call
    per block in stream order, padding included, since jsp_string_mask reads
    every byte of block.bytes regardless of len. */
 static int process_block(int out_fd, uint64_t offset, jsp_block block, jsp_output_mode mode,
                          jsp_string_state *string_state) {
     assert(block.len >= 1 && block.len <= JSP_BLOCK);
     jsp_char_masks classified = jsp_classify_masks64(block.bytes);
-    uint64_t       mask = jsp_string_mask(classified.structural, classified.quote,
-                                          classified.backslash, string_state);
+    uint64_t       mask = jsp_filter_structural_mask(classified, string_state);
     if (block.len != JSP_BLOCK) {
         mask &= ~(uint64_t)0 >> (JSP_BLOCK - block.len);
     }

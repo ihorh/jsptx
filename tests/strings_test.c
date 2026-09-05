@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 /* Feeds the fixtures under tests/data/strings/ through jsp_run and checks
    the offset stream against each fixture's .expected file.
 
