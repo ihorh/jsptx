@@ -57,4 +57,104 @@ uint64_t jsp_classify64_neon(const uint8_t *p) {
     return mask;
 }
 
+/* One bit per character rather than one bit per class: bit i is jsp_char_masks'
+   structural bit i for { } [ ] : , in that order, bit 6 is '"', bit 7 is '\'.
+   Every character needs its own bit for the nibble trick below to disambiguate
+   it correctly; folding several characters onto one shared bit (say, to save
+   the two spare bits this leaves) can make an unrelated character's nibble
+   pair alias onto it — verified against exactly that failure before writing
+   this table, with '\' (0x5C) and ',' (0x2C) sharing a low nibble. */
+#define JSP_BIT_LBRACE (1 << 0)
+#define JSP_BIT_RBRACE (1 << 1)
+#define JSP_BIT_LBRACKET (1 << 2)
+#define JSP_BIT_RBRACKET (1 << 3)
+#define JSP_BIT_COLON (1 << 4)
+#define JSP_BIT_COMMA (1 << 5)
+#define JSP_BIT_QUOTE (1 << 6)
+#define JSP_BIT_BACKSLASH (1 << 7)
+
+/* LOW[low nibble of c] & HIGH[high nibble of c] == c's own bit, for any c in
+   { } [ ] : , " \; 0 for anything else. Splitting a byte into two 4-bit
+   halves and looking each half up in its own 16-entry table, then ANDing the
+   results, is what _mm256_shuffle_epi8/vqtbl1q_u8 buys: one instruction does
+   16 (NEON) or 32 (AVX2) of these lookups in parallel, rather than one
+   compare per character. */
+static const uint8x16_t LOW_NIBBLE_TABLE = {
+    /* 0x0 */ 0,
+    /* 0x1 */ 0,
+    /* 0x2 '"' */ JSP_BIT_QUOTE,
+    /* 0x3 */ 0,
+    /* 0x4 */ 0,
+    /* 0x5 */ 0,
+    /* 0x6 */ 0,
+    /* 0x7 */ 0,
+    /* 0x8 */ 0,
+    /* 0x9 */ 0,
+    /* 0xA ':' */ JSP_BIT_COLON,
+    /* 0xB '{' '[' */ JSP_BIT_LBRACE | JSP_BIT_LBRACKET,
+    /* 0xC ',' '\' */ JSP_BIT_COMMA | JSP_BIT_BACKSLASH,
+    /* 0xD '}' ']' */ JSP_BIT_RBRACE | JSP_BIT_RBRACKET,
+    /* 0xE */ 0,
+    /* 0xF */ 0,
+};
+
+static const uint8x16_t HIGH_NIBBLE_TABLE = {
+    /* 0x0 */ 0,
+    /* 0x1 */ 0,
+    /* 0x2 ',' '"' */ JSP_BIT_COMMA | JSP_BIT_QUOTE,
+    /* 0x3 ':' */ JSP_BIT_COLON,
+    /* 0x4 */ 0,
+    /* 0x5 '[' ']' '\' */ JSP_BIT_LBRACKET | JSP_BIT_RBRACKET | JSP_BIT_BACKSLASH,
+    /* 0x6 */ 0,
+    /* 0x7 '{' '}' */ JSP_BIT_LBRACE | JSP_BIT_RBRACE,
+    /* 0x8 */ 0,
+    /* 0x9 */ 0,
+    /* 0xA */ 0,
+    /* 0xB */ 0,
+    /* 0xC */ 0,
+    /* 0xD */ 0,
+    /* 0xE */ 0,
+    /* 0xF */ 0,
+};
+
+/* Per-lane tag byte: bit i set iff this byte is exactly the character bit i
+   is assigned to above, 0 if it's none of the eight. */
+static uint8x16_t classify_tag16(const uint8_t *p) {
+    uint8x16_t v = vld1q_u8(p);
+    uint8x16_t low_nibble = vandq_u8(v, vdupq_n_u8(0x0F));
+    uint8x16_t high_nibble = vshrq_n_u8(v, 4);
+    uint8x16_t low_hit = vqtbl1q_u8(LOW_NIBBLE_TABLE, low_nibble);
+    uint8x16_t high_hit = vqtbl1q_u8(HIGH_NIBBLE_TABLE, high_nibble);
+    return vandq_u8(low_hit, high_hit);
+}
+
+/* 0xff per lane where v is nonzero, 0x00 where it's zero — movemask16 needs a
+   proper per-lane boolean, not tag16's raw bit pattern, since it extracts a
+   bit via AND-with-weight rather than a true/false test. */
+static uint8x16_t is_nonzero16(uint8x16_t v) { return vmvnq_u8(vceqq_u8(v, vdupq_n_u8(0))); }
+
+jsp_char_masks jsp_classify_masks64_neon(const uint8_t *p) {
+    jsp_char_masks masks = {0, 0, 0};
+    for (int lane = 0; lane < 4; lane++) {
+        uint8x16_t tag = classify_tag16(p + lane * 16);
+        uint8x16_t structural_hit = is_nonzero16(vandq_u8(tag, vdupq_n_u8(0x7F)));
+        uint8x16_t quote_hit = is_nonzero16(vandq_u8(tag, vdupq_n_u8(JSP_BIT_QUOTE)));
+        uint8x16_t backslash_hit = is_nonzero16(vandq_u8(tag, vdupq_n_u8(JSP_BIT_BACKSLASH)));
+        int        shift = lane * 16;
+        masks.structural |= (uint64_t)movemask16(structural_hit) << shift;
+        masks.quote |= (uint64_t)movemask16(quote_hit) << shift;
+        masks.backslash |= (uint64_t)movemask16(backslash_hit) << shift;
+    }
+    return masks;
+}
+
+#undef JSP_BIT_LBRACE
+#undef JSP_BIT_RBRACE
+#undef JSP_BIT_LBRACKET
+#undef JSP_BIT_RBRACKET
+#undef JSP_BIT_COLON
+#undef JSP_BIT_COMMA
+#undef JSP_BIT_QUOTE
+#undef JSP_BIT_BACKSLASH
+
 #endif /* defined(__ARM_NEON) */

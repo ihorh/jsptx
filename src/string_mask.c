@@ -40,16 +40,8 @@ static uint64_t backslash_parity(uint64_t backslash, bool carry_in) {
     return parity;
 }
 
-uint64_t
-jsp_string_mask(const unsigned char *block, uint64_t structural_mask, jsp_string_state *state) {
-    uint64_t backslash_mask = 0;
-    uint64_t quote_mask = 0;
-    for (int i = 0; i < 64; i++) {
-        unsigned char c = block[i];
-        backslash_mask |= (uint64_t)(c == '\\') << i;
-        quote_mask |= (uint64_t)(c == '"') << i;
-    }
-
+uint64_t jsp_string_mask(uint64_t structural_mask, uint64_t quote_mask, uint64_t backslash_mask,
+                         jsp_string_state *state) {
     uint64_t bp = backslash_parity(backslash_mask, state->in_backslash_run);
     /* A byte is escaped iff the run ending just before it (i.e. at the
        preceding byte) is odd, hence the shift: bp's own bit i means "byte i

@@ -91,8 +91,9 @@ emit_block(int out_fd, uint64_t offset, jsp_block block, uint64_t mask, jsp_outp
 static int process_block(int out_fd, uint64_t offset, jsp_block block, jsp_output_mode mode,
                          jsp_string_state *string_state) {
     assert(block.len >= 1 && block.len <= JSP_BLOCK);
-    uint64_t mask = jsp_classify64(block.bytes);
-    mask = jsp_string_mask(block.bytes, mask, string_state);
+    jsp_char_masks classified = jsp_classify_masks64(block.bytes);
+    uint64_t       mask = jsp_string_mask(classified.structural, classified.quote,
+                                          classified.backslash, string_state);
     if (block.len != JSP_BLOCK) {
         mask &= ~(uint64_t)0 >> (JSP_BLOCK - block.len);
     }
