@@ -22,7 +22,7 @@
 #include <unistd.h>
 
 static const char *const FIXTURES[] = {
-    "ndjson_objects", "array_unwrap", "bare_scalars", "array_of_scalars",
+    "ndjson_objects", "array_unwrap", "bare_scalars",   "array_of_scalars",
     "strings",        "nested",       "block_boundary",
 };
 
@@ -116,8 +116,11 @@ static void run_fixture(const char *name, size_t buf_size) {
     }
     close(in_pipe[1]);
 
-    int out_fd = open_sink();
-    assert(jsp_run(in_pipe[0], out_fd, buf_size, JSP_OUTPUT_PLUCK, -1, JSP_TRACE_NONE) == 0);
+    int             out_fd = open_sink();
+    jsp_fds         fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1};
+    jsp_run_options options = {
+        .buf_size = buf_size, .mode = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
+    assert(jsp_run(fds, options) == 0);
     close(in_pipe[0]);
 
     int status;
@@ -135,8 +138,8 @@ static void run_fixture(const char *name, size_t buf_size) {
     if ((size_t)got_size != want_len || memcmp(got, want, want_len) != 0) {
         fprintf(stderr, "pluck/%s at buf_size=%zu: got %jd bytes, want %zu\n", name, buf_size,
                 (intmax_t)got_size, want_len);
-        fprintf(stderr, "--- got ---\n%.*s--- want ---\n%.*s", (int)got_size, got, (int)want_len,
-                want);
+        fprintf(stderr, "--- got ---\n%.*s--- want ---\n%.*s", (int)got_size, got,
+                (int)want_len, want);
         abort();
     }
 
@@ -166,8 +169,11 @@ static void test_scalar_on_block_boundary(void) {
     }
     close(in_pipe[1]);
 
-    int out_fd = open_sink();
-    assert(jsp_run(in_pipe[0], out_fd, 64, JSP_OUTPUT_PLUCK, -1, JSP_TRACE_NONE) == 0);
+    int             out_fd = open_sink();
+    jsp_fds         fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1};
+    jsp_run_options options = {
+        .buf_size = 64, .mode = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
+    assert(jsp_run(fds, options) == 0);
     close(in_pipe[0]);
 
     int status;
@@ -201,8 +207,11 @@ static void test_malformed_input_fails(void) {
     }
     close(in_pipe[1]);
 
-    int out_fd = open_sink();
-    assert(jsp_run(in_pipe[0], out_fd, 64, JSP_OUTPUT_PLUCK, -1, JSP_TRACE_NONE) == -1);
+    int             out_fd = open_sink();
+    jsp_fds         fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1};
+    jsp_run_options options = {
+        .buf_size = 64, .mode = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
+    assert(jsp_run(fds, options) == -1);
     close(in_pipe[0]);
     close(out_fd);
 

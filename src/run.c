@@ -55,8 +55,8 @@ static int emit_mask(int out_fd, uint64_t offset, uint64_t mask) {
 
 /* trace's inspection stream for one block, to trace_fd: independent of
    whatever mode is doing with the same block's mask on out_fd. */
-static int
-emit_trace(int trace_fd, uint64_t offset, jsp_block block, uint64_t mask, jsp_trace_mode trace) {
+static int emit_trace(int trace_fd, uint64_t offset, jsp_block block, uint64_t mask,
+                      jsp_trace_mode trace) {
     switch (trace) {
     case JSP_TRACE_OFFSETS:
         return emit_offsets(trace_fd, offset, block, mask);
@@ -186,16 +186,15 @@ static jsp_reader_result jsp_reader_next(jsp_reader *r) {
     }
 }
 
-int jsp_run(int in_fd, int out_fd, size_t buf_size, jsp_output_mode mode, int trace_fd,
-            jsp_trace_mode trace) {
-    size_t   cap = round_up_block(buf_size);
+int jsp_run(jsp_fds fds, jsp_run_options options) {
+    size_t   cap = round_up_block(options.buf_size);
     uint8_t *buf = malloc(cap + JSP_PAD);
     if (buf == NULL) {
         return -1;
     }
 
     jsp_reader reader;
-    jsp_reader_init(&reader, in_fd, buf, cap);
+    jsp_reader_init(&reader, fds.in_fd, buf, cap);
 
     uint64_t offset = 0;
     int      result = 0;
@@ -209,8 +208,8 @@ int jsp_run(int in_fd, int out_fd, size_t buf_size, jsp_output_mode mode, int tr
         if (next.status == JSP_READER_END)      { break; }
         if (next.status == JSP_READER_ERROR)    { result = -1; break; }
         /* clang-format on */
-        if (process_block(out_fd, offset, next.block, mode, trace_fd, trace, &string_state,
-                          &pluck_state) != 0) {
+        if (process_block(fds.out_fd, offset, next.block, options.mode, fds.trace_fd,
+                          options.trace, &string_state, &pluck_state) != 0) {
             result = -1;
             break;
         }
@@ -218,7 +217,7 @@ int jsp_run(int in_fd, int out_fd, size_t buf_size, jsp_output_mode mode, int tr
     }
 
     if (result == 0) {
-        result = process_finish(out_fd, mode, &pluck_state);
+        result = process_finish(fds.out_fd, options.mode, &pluck_state);
     }
 
     free(buf);
