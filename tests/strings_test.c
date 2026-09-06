@@ -116,11 +116,11 @@ static void run_fixture(const char *name, size_t buf_size) {
     }
     close(in_pipe[1]);
 
-    int             out_fd = open_sink();
-    jsp_fds         fds = {.in_fd = in_pipe[0], .out_fd = -1, .trace_fd = out_fd};
-    jsp_run_options options = {
-        .buf_size = buf_size, .mode = JSP_OUTPUT_SINK, .trace = JSP_TRACE_OFFSETS};
-    assert(jsp_run(fds, options) == 0);
+    int          out_fd = open_sink();
+    jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = -1, .trace_fd = out_fd, .err_fd = -1};
+    jsp_settings settings = {
+        .buf_size = buf_size, .output = JSP_OUTPUT_SINK, .trace = JSP_TRACE_OFFSETS};
+    assert(jsp_run(fds, settings) == 0);
     close(in_pipe[0]);
 
     int status;

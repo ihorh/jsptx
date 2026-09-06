@@ -187,11 +187,11 @@ run_case(const uint8_t *input, size_t input_len, size_t chunk, size_t buf_size, 
     jsp_test_writer w = spawn_writer(input, input_len, chunk);
     int             out_fd = open_sink();
 
-    jsp_fds         fds = {.in_fd = w.read_fd, .out_fd = -1, .trace_fd = out_fd};
-    jsp_run_options options = {.buf_size = buf_size,
-                               .mode = JSP_OUTPUT_SINK,
-                               .trace = masks ? JSP_TRACE_MASKS : JSP_TRACE_OFFSETS};
-    assert(jsp_run(fds, options) == 0);
+    jsp_fds      fds = {.in_fd = w.read_fd, .out_fd = -1, .trace_fd = out_fd, .err_fd = -1};
+    jsp_settings settings = {.buf_size = buf_size,
+                             .output = JSP_OUTPUT_SINK,
+                             .trace = masks ? JSP_TRACE_MASKS : JSP_TRACE_OFFSETS};
+    assert(jsp_run(fds, settings) == 0);
     close(w.read_fd);
     reap_writer(w.pid);
 

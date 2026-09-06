@@ -186,8 +186,8 @@ static jsp_reader_result jsp_reader_next(jsp_reader *r) {
     }
 }
 
-int jsp_run(jsp_fds fds, jsp_run_options options) {
-    size_t   cap = round_up_block(options.buf_size);
+int jsp_run(jsp_fds fds, jsp_settings settings) {
+    size_t   cap = round_up_block(settings.buf_size);
     uint8_t *buf = malloc(cap + JSP_PAD);
     if (buf == NULL) {
         return -1;
@@ -208,8 +208,8 @@ int jsp_run(jsp_fds fds, jsp_run_options options) {
         if (next.status == JSP_READER_END)      { break; }
         if (next.status == JSP_READER_ERROR)    { result = -1; break; }
         /* clang-format on */
-        if (process_block(fds.out_fd, offset, next.block, options.mode, fds.trace_fd,
-                          options.trace, &string_state, &pluck_state) != 0) {
+        if (process_block(fds.out_fd, offset, next.block, settings.output, fds.trace_fd,
+                          settings.trace, &string_state, &pluck_state) != 0) {
             result = -1;
             break;
         }
@@ -217,7 +217,7 @@ int jsp_run(jsp_fds fds, jsp_run_options options) {
     }
 
     if (result == 0) {
-        result = process_finish(fds.out_fd, options.mode, &pluck_state);
+        result = process_finish(fds.out_fd, settings.output, &pluck_state);
     }
 
     free(buf);

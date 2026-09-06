@@ -116,11 +116,11 @@ static void run_fixture(const char *name, size_t buf_size) {
     }
     close(in_pipe[1]);
 
-    int             out_fd = open_sink();
-    jsp_fds         fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1};
-    jsp_run_options options = {
-        .buf_size = buf_size, .mode = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
-    assert(jsp_run(fds, options) == 0);
+    int          out_fd = open_sink();
+    jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1, .err_fd = -1};
+    jsp_settings settings = {
+        .buf_size = buf_size, .output = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
+    assert(jsp_run(fds, settings) == 0);
     close(in_pipe[0]);
 
     int status;
@@ -169,11 +169,11 @@ static void test_scalar_on_block_boundary(void) {
     }
     close(in_pipe[1]);
 
-    int             out_fd = open_sink();
-    jsp_fds         fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1};
-    jsp_run_options options = {
-        .buf_size = 64, .mode = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
-    assert(jsp_run(fds, options) == 0);
+    int          out_fd = open_sink();
+    jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1, .err_fd = -1};
+    jsp_settings settings = {
+        .buf_size = 64, .output = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
+    assert(jsp_run(fds, settings) == 0);
     close(in_pipe[0]);
 
     int status;
@@ -207,11 +207,11 @@ static void test_malformed_input_fails(void) {
     }
     close(in_pipe[1]);
 
-    int             out_fd = open_sink();
-    jsp_fds         fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1};
-    jsp_run_options options = {
-        .buf_size = 64, .mode = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
-    assert(jsp_run(fds, options) == -1);
+    int          out_fd = open_sink();
+    jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1, .err_fd = -1};
+    jsp_settings settings = {
+        .buf_size = 64, .output = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
+    assert(jsp_run(fds, settings) == -1);
     close(in_pipe[0]);
     close(out_fd);
 

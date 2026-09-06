@@ -77,12 +77,12 @@ static void run_at(int fd, size_t input_len, size_t buf_size) {
         exit(1);
     }
 
-    jsp_fds         fds = {.in_fd = fd, .out_fd = -1, .trace_fd = -1};
-    jsp_run_options options = {
-        .buf_size = buf_size, .mode = JSP_OUTPUT_SINK, .trace = JSP_TRACE_NONE};
+    jsp_fds      fds = {.in_fd = fd, .out_fd = -1, .trace_fd = -1, .err_fd = -1};
+    jsp_settings settings = {
+        .buf_size = buf_size, .output = JSP_OUTPUT_SINK, .trace = JSP_TRACE_NONE};
 
     double start = now();
-    int    result = jsp_run(fds, options);
+    int    result = jsp_run(fds, settings);
     double elapsed = now() - start;
     if (result != 0) {
         perror("jsp_run");
