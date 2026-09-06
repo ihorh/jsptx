@@ -9,6 +9,20 @@
 
 #define JSP_DEFAULT_BUF_SIZE ((size_t)65536)
 
+static const char *usage_text =
+    "Usage: jsptx [PATH] [OPTIONS]\n"
+    "\n"
+    "  Reads a JSON stream on stdin. With PATH, prints each record's matching\n"
+    "  value verbatim, one per line; \".\" matches the whole record and is the\n"
+    "  only path implemented so far. Without PATH, classifies the stream and\n"
+    "  discards the result.\n"
+    "\n"
+    "Options:\n"
+    "  --buf-size=N   read in chunks of N bytes (default %zu)\n"
+    "  --offsets      trace every structural character's offset to stderr\n"
+    "  --masks        trace each block's classification to stderr, as hex\n"
+    "  -h, --help     print this message and exit\n";
+
 typedef struct {
     int  value;
     jstr rest;
@@ -52,41 +66,32 @@ static jstr parse_path(jstr arg) {
     return arg;
 }
 
-static void print_usage(FILE *out) {
-    fprintf(out,
-            "Usage: jsptx [PATH] [OPTIONS]\n"
-            "\n"
-            "  Reads a JSON stream on stdin. With PATH, prints each record's matching\n"
-            "  value verbatim, one per line; \".\" matches the whole record and is the\n"
-            "  only path implemented so far. Without PATH, classifies the stream and\n"
-            "  discards the result.\n"
-            "\n"
-            "Options:\n"
-            "  --buf-size=N   read in chunks of N bytes (default %zu)\n"
-            "  --offsets      trace every structural character's offset to stderr\n"
-            "  --masks        trace each block's classification to stderr, as hex\n"
-            "  -h, --help     print this message and exit\n",
-            JSP_DEFAULT_BUF_SIZE);
-}
+static const jstr FLG_HELP = JSTR("--help");
+static const jstr FLG_HELP_S = JSTR("-h");
+static const jstr FLG_OFFSET = JSTR("--offsets");
+static const jstr FLG_MASKS = JSTR("--masks");
+static const jstr OPT_BUF_SIZE = JSTR("--buf-size=");
+
+static const jsp_settings JSP_SETTINGS_DEFAULT = {
+    .buf_size = JSP_DEFAULT_BUF_SIZE,
+    .output = JSP_OUTPUT_SINK,
+    .trace = JSP_TRACE_NONE,
+};
 
 jsp_settings jsp_settings_parse(int argc, char **argv) {
-    jsp_settings settings = {
-        .buf_size = JSP_DEFAULT_BUF_SIZE, .output = JSP_OUTPUT_SINK, .trace = JSP_TRACE_NONE};
-    jstr prefix = JSTR("--buf-size=");
-    jstr offsets_flag = JSTR("--offsets");
-    jstr masks_flag = JSTR("--masks");
-    bool have_path = false;
+    jsp_settings settings = JSP_SETTINGS_DEFAULT;
+    bool         have_path = false;
 
     for (int i = 1; i < argc; i++) {
         jstr arg = jstr_init(argv[i]);
-        if (jstr_equal(arg, JSTR("-h")) || jstr_equal(arg, JSTR("--help"))) {
-            print_usage(stdout);
+        if (jstr_equal(arg, FLG_HELP_S) || jstr_equal(arg, FLG_HELP)) {
+            fprintf(stdout, usage_text, JSP_DEFAULT_BUF_SIZE);
             exit(0);
-        } else if (jstr_starts_with(arg, prefix)) {
-            settings.buf_size = parse_buf_size(jstr_after(arg, prefix.len));
-        } else if (jstr_equal(arg, offsets_flag)) {
+        } else if (jstr_starts_with(arg, OPT_BUF_SIZE)) {
+            settings.buf_size = parse_buf_size(jstr_after(arg, OPT_BUF_SIZE.len));
+        } else if (jstr_equal(arg, FLG_OFFSET)) {
             settings.trace = JSP_TRACE_OFFSETS;
-        } else if (jstr_equal(arg, masks_flag)) {
+        } else if (jstr_equal(arg, FLG_MASKS)) {
             settings.trace = JSP_TRACE_MASKS;
         } else if (jstr_starts_with(arg, JSTR("--"))) {
             fprintf(stderr, "jsptx: unrecognized argument: %s\n", argv[i]);
