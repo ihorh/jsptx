@@ -186,18 +186,22 @@ static jsp_reader_result jsp_reader_next(jsp_reader *r) {
     }
 }
 
-int jsp_run(jsp_fds fds, jsp_settings settings) {
+static inline jsp_result jsp_result_make_(jsp_status status) {
+    return (jsp_result){.status = status, .sys_errno = status == JSP_OK ? 0 : errno};
+}
+
+jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
     size_t   cap = round_up_block(settings.buf_size);
     uint8_t *buf = malloc(cap + JSP_PAD);
     if (buf == NULL) {
-        return -1;
+        return jsp_result_make_(JSP_ERR_ALLOC);
     }
 
     jsp_reader reader;
     jsp_reader_init(&reader, fds.in_fd, buf, cap);
 
-    uint64_t offset = 0;
-    int      result = 0;
+    uint64_t   offset = 0;
+    jsp_status result = JSP_OK;
 
     jsp_string_state string_state = {0};
     jsp_pluck_state  pluck_state = {0};
@@ -206,20 +210,22 @@ int jsp_run(jsp_fds fds, jsp_settings settings) {
         jsp_reader_result next = jsp_reader_next(&reader);
         /* clang-format off */
         if (next.status == JSP_READER_END)      { break; }
-        if (next.status == JSP_READER_ERROR)    { result = -1; break; }
+        if (next.status == JSP_READER_ERROR)    { result = JSP_ERR_IO; break; }
         /* clang-format on */
         if (process_block(fds.out_fd, offset, next.block, settings.output, fds.trace_fd,
                           settings.trace, &string_state, &pluck_state) != 0) {
-            result = -1;
+            result = JSP_ERR_BLOCK_PROCESS_TMP;
             break;
         }
         offset += JSP_BLOCK;
     }
 
-    if (result == 0) {
-        result = process_finish(fds.out_fd, settings.output, &pluck_state);
+    if (result == JSP_OK) {
+        result = process_finish(fds.out_fd, settings.output, &pluck_state) == 0
+                     ? JSP_OK
+                     : JSP_ERR_BLOCK_PROCESS_TMP;
     }
 
     free(buf);
-    return result;
+    return jsp_result_make_(result);
 }

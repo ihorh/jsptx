@@ -120,7 +120,7 @@ static void run_fixture(const char *name, size_t buf_size) {
     jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1, .err_fd = -1};
     jsp_settings settings = {
         .buf_size = buf_size, .output = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
-    assert(jsp_run(fds, settings) == 0);
+    assert(jsp_run(fds, settings).status == JSP_OK);
     close(in_pipe[0]);
 
     int status;
@@ -173,7 +173,7 @@ static void test_scalar_on_block_boundary(void) {
     jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1, .err_fd = -1};
     jsp_settings settings = {
         .buf_size = 64, .output = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
-    assert(jsp_run(fds, settings) == 0);
+    assert(jsp_run(fds, settings).status == JSP_OK);
     close(in_pipe[0]);
 
     int status;
@@ -211,7 +211,9 @@ static void test_malformed_input_fails(void) {
     jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1, .err_fd = -1};
     jsp_settings settings = {
         .buf_size = 64, .output = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
-    assert(jsp_run(fds, settings) == -1);
+    /* JSP_ERR_BLOCK_PROCESS_TMP is the status today, but its name says it is
+       a placeholder; what this test pins is that the run fails at all. */
+    assert(jsp_run(fds, settings).status != JSP_OK);
     close(in_pipe[0]);
     close(out_fd);
 

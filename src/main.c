@@ -9,19 +9,19 @@ int main(int argc, char **argv) {
     jsp_fds fds = {
         .in_fd = STDIN_FILENO,
         .out_fd = STDOUT_FILENO,
-        .trace_fd = STDERR_FILENO,
         .err_fd = STDERR_FILENO,
+        .trace_fd = STDERR_FILENO,
     };
     jsp_settings settings = jsp_settings_parse(argc, argv);
 
-    errno = 0;
-    if (jsp_run(fds, settings) != 0) {
-        if (errno != 0) {
-            perror("jsptx");
+    jsp_result result = jsp_run(fds, settings);
+
+    if (result.status != JSP_OK) {
+        if (result.sys_errno != 0) {
+            fprintf(stderr, "jsptrx: %d, %s", result.sys_errno, strerror(result.sys_errno));
         } else {
             fprintf(stderr, "jsptx: malformed input\n");
         }
-        return 1;
     }
-    return 0;
+    return (int)result.status;
 }

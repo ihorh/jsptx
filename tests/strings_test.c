@@ -120,7 +120,7 @@ static void run_fixture(const char *name, size_t buf_size) {
     jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = -1, .trace_fd = out_fd, .err_fd = -1};
     jsp_settings settings = {
         .buf_size = buf_size, .output = JSP_OUTPUT_SINK, .trace = JSP_TRACE_OFFSETS};
-    assert(jsp_run(fds, settings) == 0);
+    assert(jsp_run(fds, settings).status == JSP_OK);
     close(in_pipe[0]);
 
     int status;
