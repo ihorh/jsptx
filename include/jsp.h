@@ -53,7 +53,7 @@ typedef enum {
 
 typedef struct {
     jsp_status status;
-    int sys_errno;
+    int        sys_errno;
 } jsp_result;
 
 /* Reads fds.in_fd until end of file, classifying the structural JSON

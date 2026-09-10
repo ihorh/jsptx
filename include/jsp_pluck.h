@@ -24,9 +24,9 @@ typedef enum {
    zero-initialization contract. */
 typedef struct {
     jsp_pluck_phase phase;
-    bool            shape_known; /* whether the stream's first non-whitespace byte has been seen */
-    bool            unwrap;      /* the whole stream is one top-level array; its elements are records */
-    unsigned        record_depth; /* the depth records sit at: 0, or 1 once unwrap */
+    bool     shape_known; /* whether the stream's first non-whitespace byte has been seen */
+    bool     unwrap; /* the whole stream is one top-level array; its elements are records */
+    unsigned record_depth; /* the depth records sit at: 0, or 1 once unwrap */
     jsp_depth_state depth;
 } jsp_pluck_state;
 

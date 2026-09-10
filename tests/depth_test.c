@@ -37,8 +37,8 @@ static void test_nested_mixed(void) {
 }
 
 static void test_non_bracket_chars_never_change_depth(void) {
-    jsp_depth_state before = {.stack = 0x5, .depth = 3};
-    jsp_depth_state state = before;
+    jsp_depth_state   before = {.stack = 0x5, .depth = 3};
+    jsp_depth_state   state = before;
     static const char chars[] = ":,\"";
     for (size_t i = 0; i < sizeof(chars) - 1; i++) {
         jsp_depth_result got = jsp_depth_step(&state, (uint8_t)chars[i]);
@@ -89,8 +89,8 @@ static void test_concatenated_records_each_reach_boundary(void) {
     /* {}[]{} : three top-level values back to back, each its own boundary,
        with no state surviving from one to the next. */
     static const jsp_depth_result want[] = {
-        JSP_DEPTH_OK, JSP_DEPTH_BOUNDARY, JSP_DEPTH_OK, JSP_DEPTH_BOUNDARY, JSP_DEPTH_OK,
-        JSP_DEPTH_BOUNDARY,
+        JSP_DEPTH_OK,       JSP_DEPTH_BOUNDARY, JSP_DEPTH_OK,
+        JSP_DEPTH_BOUNDARY, JSP_DEPTH_OK,       JSP_DEPTH_BOUNDARY,
     };
     run_sequence("{}[]{}", want, 6);
 }

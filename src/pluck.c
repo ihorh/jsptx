@@ -26,8 +26,8 @@ static void discover_shape(jsp_pluck_state *state, uint8_t c) {
    inside a bare scalar, the run is where the transition actually happens:
    whitespace ends a scalar, and a non-whitespace byte outside a bracket or
    quote starts one, so this scans byte by byte to find it. */
-static int process_run(jsp_pluck_state *state, const uint8_t *bytes, unsigned start, unsigned end,
-                        int out_fd) {
+static int process_run(jsp_pluck_state *state, const uint8_t *bytes, unsigned start,
+                       unsigned end, int out_fd) {
     if (end <= start) {
         return 0;
     }
@@ -72,7 +72,8 @@ static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
     bool opening_wrapper = false;
     if (!state->shape_known) {
         discover_shape(state, c);
-        opening_wrapper = state->unwrap; /* true here means c == '[' by discover_shape's own test */
+        opening_wrapper =
+            state->unwrap; /* true here means c == '[' by discover_shape's own test */
     }
 
     jsp_depth_result r = jsp_depth_step(&state->depth, c);
