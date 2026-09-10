@@ -9,7 +9,7 @@
    tests/strings_test.c already checks for the offset stream: the same
    input must produce the same records no matter how the reads land. */
 
-#include "jsp.h"
+#include "jsp_run.h"
 
 #include <assert.h>
 #include <errno.h>

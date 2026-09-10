@@ -1,6 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include "jsp.h"
+#include "jsp_run.h"
 
 #include "jsp_block.h"
 #include "jsp_classify.h"

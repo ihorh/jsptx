@@ -134,7 +134,7 @@ No key or value is ever copied, which lets a span exceed the read buffer
 harmlessly. This holds the constant-memory requirement, and it is the part
 worth getting right.
 
-`jsp_reader` (`src/run.c:139-182`) moves its remainder to `buf[0]` and reads in
+`jsp_reader` (`src/jsp_run.c:139-182`) moves its remainder to `buf[0]` and reads in
 behind it, so every pointer into `buf` dies on refill. All new state is
 therefore counters.
 
@@ -169,12 +169,12 @@ only at a depth equal to that counter, and decrements on popping above it.
 Each one is verified against the code rather than assumed.
 
 1. **A stream ending on a 64-byte boundary yields no final block.**
-   `src/run.c:165-166` returns `JSP_READER_END` with `fill` at zero. A value
+   `src/jsp_run.c:165-166` returns `JSP_READER_END` with `fill` at zero. A value
    still emitting must terminate after the loop breaks, or the last value loses
    its newline in silence.
-2. **The byte walk bounds by `block.len`, never by 64.** `src/run.c:169-170`
+2. **The byte walk bounds by `block.len`, never by 64.** `src/jsp_run.c:169-170`
    pads the trailing block with `0x20` past `len`. `process_block` clears those
-   bits from the mask (`src/run.c:96-98`), and a byte walk between mask bits
+   bits from the mask (`src/jsp_run.c:96-98`), and a byte walk between mask bits
    has no equivalent guard, so it would emit pad spaces.
 3. **`jsp_string_state.in_string` is an end-of-block value.**
    `include/jsp_string_mask.h:18-30` updates it once per block, which makes it
@@ -209,9 +209,9 @@ the design with no path logic involved.
    record boundaries, container kind, and detection of malformed nesting.
 2. The byte walk steps the ranges between mask bits, bounded by `block.len`. A
    new `jsp_pluck_state` threads through `process_block` the way
-   `jsp_string_state` does at `src/run.c:188`.
+   `jsp_string_state` does at `src/jsp_run.c:188`.
 3. Value-kind dispatch and write-through emission reuse `write_all`
-   (`src/run.c:33`). A value in flight terminates when the reader reports
+   (`src/jsp_run.c:33`). A value in flight terminates when the reader reports
    `JSP_READER_END`.
 4. The CLI takes a positional path argument in `src/jsp_settings.c`, which
    already hand-parses flags and uses `jstr` (`include/jstr.h`). `--masks`,

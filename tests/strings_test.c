@@ -9,7 +9,7 @@
    carries over here: the same input must produce the same offsets no
    matter how the reads land. */
 
-#include "jsp.h"
+#include "jsp_run.h"
 
 #include <assert.h>
 #include <errno.h>

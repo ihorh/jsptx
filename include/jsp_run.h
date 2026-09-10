@@ -1,5 +1,5 @@
-#ifndef JSP_H
-#define JSP_H
+#ifndef JSP_RUN_H
+#define JSP_RUN_H
 
 #include "jstr.h"
 
@@ -83,4 +83,4 @@ typedef struct {
    brackets, or nesting past JSP_MAX_DEPTH. */
 jsp_result jsp_run(jsp_fds fds, jsp_settings settings);
 
-#endif /* JSP_H */
+#endif /* JSP_RUN_H */

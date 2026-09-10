@@ -8,7 +8,7 @@
  * `zig build test`. Run it (`zig build bench`) when the classify or
  * string-mask stages change, and read the table.
  */
-#include "jsp.h"
+#include "jsp_run.h"
 
 #include <inttypes.h>
 #include <stdint.h>

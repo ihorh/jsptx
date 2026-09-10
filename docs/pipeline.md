@@ -11,17 +11,17 @@ Four complaints, each with the evidence in the tree.
 
 **`process_block` serves two output channels.** It classifies, masks, trims,
 traces, and dispatches a mode, which is why it takes eight parameters
-(`src/run.c:79-81`). `.claude-notes/m3-abandoned.md` names the growing
+(`src/jsp_run.c:79-81`). `.claude-notes/m3-abandoned.md` names the growing
 parameter list as the tell that killed M3, where it reached nine. Nobody
 counted this time.
 
 **Every consumer walks the mask itself.** `jsp_pluck_step` decodes
-`(block, mask)` into runs and structural bytes by hand (`src/pluck.c:136-149`).
+`(block, mask)` into runs and structural bytes by hand (`src/jsp_pluck.c:136-149`).
 A filter or a CSV structurer would each write that loop again.
 
 **The plucker nests four deep.** `process_run` carries the byte walk and the
 record state machine together, so its write calls sit four levels in
-(`src/pluck.c:39-61`).
+(`src/jsp_pluck.c:39-61`).
 
 **Names say nothing.** `process_block`, `process_run`, `step_structural`, and
 `discover_shape` name no domain concept between them.
@@ -66,22 +66,26 @@ Steps 1 to 3 invent no abstraction. They move code that already exists into
 files that already have names. Step 5 is the only one that adds a concept, and
 step 4 exists so it gets decided with more information than today.
 
-### Step 1 — One-to-One Headers and Sources
+### Step 1 — One-to-One Headers and Sources (landed)
 
-`src/jsp_X.c` implements `include/jsp_X.h`. Renames: `io.c`, `pluck.c`,
-`string_mask.c`, and `run.c`. `jzbuild` infers the file list from the
-directories, so `build.zig` needs no edit.
+Landed on `rename-modules` as option (a): `jsp.h` became `jsp_run.h` and the
+umbrella went. Seven sources and one header renamed, seven include lines and
+one guard updated, nothing else touched. `zig build test` stayed green, and the
+x86 cross-compile still builds the AVX2 path.
 
-Two exceptions stay, and both get named rather than left as drift. `main.c` is
-an entry point with no header. `jsp_classify.h` has three implementations
-chosen by architecture, so `classify_scalar.c`, `classify_neon.c`, and
-`classify_avx2.c` gain the `jsp_` prefix and keep the one-to-three shape.
+`src/jsp_X.c` implements `include/jsp_X.h`. `jzbuild` infers the file list from
+the directories, so `build.zig` needed no edit.
 
-`run.c` forces a real choice, since `jsp.h` is the public header that `main.c`,
-`bench/jsp_run_bench.c`, and three tests include.
+Two exceptions stay, and both are named here rather than left as drift.
+`main.c` is an entry point with no header. `jsp_classify.h` has three
+implementations chosen by architecture, so `jsp_classify_scalar.c`,
+`jsp_classify_neon.c`, and `jsp_classify_avx2.c` keep the one-to-three shape.
 
-- **(a) `jsp.h` becomes `jsp_run.h`, and the umbrella goes.** Five include
-  lines change. Recommended: four headers are few enough to include directly.
+`jsp.h` forced the one real choice, since `main.c`, `bench/jsp_run_bench.c`,
+and three tests included it. The alternatives, for the record:
+
+- **(a) `jsp.h` becomes `jsp_run.h`, and the umbrella goes.** Seven include
+  lines change. Taken: four headers are few enough to include directly.
   An umbrella built for a library nobody consumes is the speculative packaging
   this project deletes on sight.
 - **(b) `jsp.h` splits.** `jsp_run.h` takes the types and the function,
@@ -92,7 +96,7 @@ chosen by architecture, so `classify_scalar.c`, `classify_neon.c`, and
 
 ### Step 2 — `jsp_reader` Moves Out
 
-`src/run.c:107-187` is already a self-contained struct with an init and a next.
+`src/jsp_run.c:107-187` is already a self-contained struct with an init and a next.
 Moving it to `jsp_reader.h`/`jsp_reader.c` takes 81 of `run.c`'s 231 lines with
 it, and gives the reader tests of its own.
 
@@ -103,7 +107,7 @@ Recommended: separate unit.
 
 ### Step 3 — Trace Becomes a Module
 
-`emit_offsets`, `emit_mask`, and `emit_trace` (`src/run.c:33-69`) move to
+`emit_offsets`, `emit_mask`, and `emit_trace` (`src/jsp_run.c:33-69`) move to
 `jsp_trace.h`/`jsp_trace.c`, behind a handle built once from `jsp_fds` and
 `jsp_settings`. `process_block` drops `trace_fd` and `trace`, reaching six
 parameters.
@@ -136,7 +140,7 @@ choice is easier to make once it looks like that.
 ### Step 5 — `jsp_scan` Emits Tokens
 
 `process_block` and `process_finish` disappear. `jsp_run`'s loop pulls tokens,
-traces, and pushes. The plucker's bit walk (`src/pluck.c:136-149`) deletes.
+traces, and pushes. The plucker's bit walk (`src/jsp_pluck.c:136-149`) deletes.
 
 Splittable in two, if the whole move reads as too large to judge:
 
