@@ -18,10 +18,8 @@
 #include <string.h>
 #include <unistd.h>
 
-/* One classification covers JSP_BLOCK bytes, and padding the final partial
-   block writes up to that many octets past its start. */
+/* One classification covers JSP_BLOCK bytes. */
 #define JSP_BLOCK 64
-#define JSP_PAD JSP_BLOCK
 
 static size_t round_up_block(size_t n) {
     if (n < JSP_BLOCK) {
@@ -116,9 +114,11 @@ typedef struct {
     jsp_block         block;
 } jsp_reader_result;
 
-/* Turns a byte stream into a sequence of blocks. buf must hold cap + JSP_PAD
-   bytes, cap a multiple of JSP_BLOCK: the pad is where a trailing partial
-   block gets padded, past the real bytes read into it. */
+/* Turns a byte stream into a sequence of blocks. cap is a multiple of
+   JSP_BLOCK, so a block handed out never reaches past buf[cap): a full block
+   starts at a multiple of JSP_BLOCK below fill, and the trailing partial one
+   starts at buf[0], having been compacted there before the read that found
+   end of file. */
 typedef struct {
     int      fd;
     uint8_t *buf;
@@ -192,7 +192,7 @@ static inline jsp_result jsp_result_make_(jsp_status status) {
 
 jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
     size_t   cap = round_up_block(settings.buf_size);
-    uint8_t *buf = malloc(cap + JSP_PAD);
+    uint8_t *buf = malloc(cap);
     if (buf == NULL) {
         return jsp_result_make_(JSP_ERR_ALLOC);
     }

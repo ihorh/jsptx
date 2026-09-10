@@ -98,8 +98,7 @@ standard. Given that, the rule is where each tier may appear.
 
 POSIX buys exactly one thing worth having, which is `read(2)` on a descriptor.
 Alignment needs nothing, because both architectures load unaligned at full
-speed, so plain `malloc` with an over-allocated pad replaces `posix_memalign`
-and C11's `aligned_alloc`. Flag parsing is a dozen lines by hand, so `getopt`
+speed, so plain `malloc` replaces `posix_memalign` and C11's `aligned_alloc`. Flag parsing is a dozen lines by hand, so `getopt`
 stays out.
 
 Under `-std=c99` the POSIX declarations are hidden. The I/O file defines
