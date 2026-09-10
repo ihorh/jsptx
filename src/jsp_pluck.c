@@ -3,6 +3,7 @@
 #include "jsp_io.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 static bool is_json_ws(uint8_t c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
@@ -26,8 +27,8 @@ static void discover_shape(jsp_pluck_state *state, uint8_t c) {
    inside a bare scalar, the run is where the transition actually happens:
    whitespace ends a scalar, and a non-whitespace byte outside a bracket or
    quote starts one, so this scans byte by byte to find it. */
-static int process_run(jsp_pluck_state *state, const uint8_t *bytes, unsigned start,
-                       unsigned end, int out_fd) {
+static int process_run(jsp_pluck_state *state, const uint8_t *bytes, size_t start, size_t end,
+                       int out_fd) {
     if (end <= start) {
         return 0;
     }
@@ -35,8 +36,8 @@ static int process_run(jsp_pluck_state *state, const uint8_t *bytes, unsigned st
         return jsp_write_all(out_fd, bytes + start, end - start);
     }
 
-    unsigned span_start = start; /* meaningful only once phase is JSP_PLUCK_SCALAR */
-    for (unsigned i = start; i < end; i++) {
+    size_t span_start = start; /* meaningful only once phase is JSP_PLUCK_SCALAR */
+    for (size_t i = start; i < end; i++) {
         bool ws = is_json_ws(bytes[i]);
         if (state->phase == JSP_PLUCK_SCALAR) {
             if (ws) {
@@ -131,19 +132,19 @@ static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
     return 0;
 }
 
-int jsp_pluck_step(jsp_pluck_state *state, jsp_block block, uint64_t mask, int out_fd) {
-    unsigned pos = 0;
-    unsigned len = block.len;
+int jsp_pluck_step(jsp_pluck_state *state, jsp_slice block, uint64_t mask, int out_fd) {
+    size_t pos = 0;
+    size_t len = block.len;
     while (pos < len) {
         uint64_t remaining = mask & (~(uint64_t)0 << pos);
         if (remaining == 0) {
-            return process_run(state, block.bytes, pos, len, out_fd);
+            return process_run(state, block.ptr, pos, len, out_fd);
         }
-        unsigned bit = (unsigned)__builtin_ctzll(remaining);
-        if (process_run(state, block.bytes, pos, bit, out_fd) != 0) {
+        size_t bit = (size_t)__builtin_ctzll(remaining);
+        if (process_run(state, block.ptr, pos, bit, out_fd) != 0) {
             return -1;
         }
-        if (step_structural(state, block.bytes[bit], out_fd) != 0) {
+        if (step_structural(state, block.ptr[bit], out_fd) != 0) {
             return -1;
         }
         pos = bit + 1;

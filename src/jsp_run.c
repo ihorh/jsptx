@@ -2,7 +2,7 @@
 
 #include "jsp_run.h"
 
-#include "jsp_block.h"
+#include "jsp_slice.h"
 #include "jsp_classify.h"
 #include "jsp_io.h"
 #include "jsp_pluck.h"
@@ -28,15 +28,15 @@ static size_t round_up_block(size_t n) {
     return (n + JSP_BLOCK - 1) / JSP_BLOCK * JSP_BLOCK;
 }
 
-/* One line per set bit in mask: "<offset + bit>\t<block.bytes[bit]>\n". */
-static int emit_offsets(int out_fd, uint64_t offset, jsp_block block, uint64_t mask) {
+/* One line per set bit in mask: "<offset + bit>\t<block.ptr[bit]>\n". */
+static int emit_offsets(int out_fd, uint64_t offset, jsp_slice block, uint64_t mask) {
     while (mask != 0) {
         int bit = __builtin_ctzll(mask);
         mask &= mask - 1;
 
         char line[32];
         int  len = snprintf(line, sizeof(line), "%" PRIu64 "\t%c\n", offset + (uint64_t)bit,
-                            block.bytes[bit]);
+                            block.ptr[bit]);
         if (jsp_write_all(out_fd, (unsigned char *)line, (size_t)len) != 0) {
             return -1;
         }
@@ -53,7 +53,7 @@ static int emit_mask(int out_fd, uint64_t offset, uint64_t mask) {
 
 /* trace's inspection stream for one block, to trace_fd: independent of
    whatever mode is doing with the same block's mask on out_fd. */
-static int emit_trace(int trace_fd, uint64_t offset, jsp_block block, uint64_t mask,
+static int emit_trace(int trace_fd, uint64_t offset, jsp_slice block, uint64_t mask,
                       jsp_trace_mode trace) {
     switch (trace) {
     case JSP_TRACE_OFFSETS:
@@ -73,12 +73,12 @@ static int emit_trace(int trace_fd, uint64_t offset, jsp_block block, uint64_t m
    makes that shift defined, since 1 << len would not be at len 64.
    string_state carries in_string and trailing_backslash_unpaired across calls, one call
    per block in stream order, padding included, since jsp_string_mask reads
-   every byte of block.bytes regardless of len. */
-static int process_block(int out_fd, uint64_t offset, jsp_block block, jsp_output_mode mode,
+   every byte of block.ptr regardless of len. */
+static int process_block(int out_fd, uint64_t offset, jsp_slice block, jsp_output_mode mode,
                          int trace_fd, jsp_trace_mode trace, jsp_string_state *string_state,
                          jsp_pluck_state *pluck_state) {
     assert(block.len >= 1 && block.len <= JSP_BLOCK);
-    jsp_char_masks classified = jsp_classify_masks64(block.bytes);
+    jsp_char_masks classified = jsp_classify_masks64(block.ptr);
     uint64_t       mask = jsp_filter_structural_mask(classified, string_state);
     if (block.len != JSP_BLOCK) {
         mask &= ~(uint64_t)0 >> (JSP_BLOCK - block.len);
@@ -111,7 +111,7 @@ typedef enum {
 /* block is meaningful only when status is JSP_READER_BLOCK. */
 typedef struct {
     jsp_reader_status status;
-    jsp_block         block;
+    jsp_slice         block;
 } jsp_reader_result;
 
 /* Turns a byte stream into a sequence of blocks. cap is a multiple of
@@ -147,7 +147,7 @@ static jsp_reader_result jsp_reader_next(jsp_reader *r) {
     }
 
     if (r->pos + JSP_BLOCK <= r->fill) {
-        jsp_block block = jsp_block_make(r->buf + r->pos, JSP_BLOCK);
+        jsp_slice block = jsp_slice_make(r->buf + r->pos, JSP_BLOCK);
         r->pos += JSP_BLOCK;
         return (jsp_reader_result){.status = JSP_READER_BLOCK, .block = block};
     }
@@ -172,14 +172,14 @@ static jsp_reader_result jsp_reader_next(jsp_reader *r) {
             }
             /* A space is not structural, so padding with it reports nothing. */
             memset(r->buf + r->fill, 0x20, JSP_BLOCK - r->fill);
-            jsp_block block = jsp_block_make(r->buf, (unsigned)r->fill);
+            jsp_slice block = jsp_slice_make(r->buf, r->fill);
             r->pos = r->fill;
             return (jsp_reader_result){.status = JSP_READER_BLOCK, .block = block};
         }
 
         r->fill += (size_t)n;
         if (r->fill >= JSP_BLOCK) {
-            jsp_block block = jsp_block_make(r->buf, JSP_BLOCK);
+            jsp_slice block = jsp_slice_make(r->buf, JSP_BLOCK);
             r->pos = JSP_BLOCK;
             return (jsp_reader_result){.status = JSP_READER_BLOCK, .block = block};
         }
