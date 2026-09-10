@@ -2,7 +2,7 @@
 #define JSP_PLUCK_H
 
 #include "jsp_depth.h"
-#include "jsp_slice_u8.h"
+#include "jsp_scan.h"
 
 #include <stdint.h>
 
@@ -29,13 +29,13 @@ typedef struct {
     jsp_depth_state depth;
 } jsp_pluck_state;
 
-/* Walks one block, writing each record's own bytes verbatim, terminated by
-   a newline, straight to out_fd, with no key path applied: jsptx . prints
-   every record whole. mask is jsp_filter_structural_mask's result for the
-   same block, trimmed to block.len the way process_block already trims it
-   for the offset stream. Returns 0, or -1 on a write error or on malformed
-   input: unbalanced or mismatched brackets, or nesting past JSP_MAX_DEPTH. */
-int jsp_pluck_step(jsp_pluck_state *state, jsp_slice_u8 block, uint64_t mask, int out_fd);
+/* Takes one token, writing each record's own bytes verbatim, terminated by a
+   newline, straight to out_fd, with no key path applied: jsptx . prints every
+   record whole. Call once per token from jsp_scan_next, in order, for every
+   RUN and STRUCTURAL the stream yields. Returns 0, or -1 on a write error or
+   on malformed input: unbalanced or mismatched brackets, or nesting past
+   JSP_MAX_DEPTH. */
+int jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd);
 
 /* Closes a bare scalar record left in flight when the stream ends exactly
    where it stands: jsp_pluck_step only ever closes a scalar on a following

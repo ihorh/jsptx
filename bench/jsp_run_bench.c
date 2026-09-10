@@ -10,6 +10,7 @@
  */
 #include "jsp_run.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -81,10 +82,11 @@ static void run_at(int fd, size_t input_len, size_t buf_size) {
     jsp_settings settings = {
         .buf_size = buf_size, .output = JSP_OUTPUT_SINK, .trace = JSP_TRACE_NONE};
 
-    double start = now();
-    int    result = jsp_run(fds, settings);
-    double elapsed = now() - start;
-    if (result != 0) {
+    double     start = now();
+    jsp_result result = jsp_run(fds, settings);
+    double     elapsed = now() - start;
+    if (result.status != JSP_OK) {
+        errno = result.sys_errno;
         perror("jsp_run");
         exit(1);
     }

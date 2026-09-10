@@ -19,29 +19,25 @@ static void discover_shape(jsp_pluck_state *state, uint8_t c) {
     state->record_depth = state->unwrap ? 1 : 0;
 }
 
-/* Handles bytes[start,end): a run with no structural byte in it, since
-   those are all mask bits and jsp_pluck_step routes them elsewhere. A
+/* Handles one run: octets with no structural one among them, since those
+   arrive as their own tokens and jsp_pluck_push routes them elsewhere. A
    string or container record's content needs no byte-level look at this
    run at all, since only the record's own terminating mask bit can end it,
    so the whole run is emitted verbatim in one write. Between records, and
    inside a bare scalar, the run is where the transition actually happens:
    whitespace ends a scalar, and a non-whitespace byte outside a bracket or
    quote starts one, so this scans byte by byte to find it. */
-static int process_run(jsp_pluck_state *state, const uint8_t *bytes, size_t start, size_t end,
-                       int out_fd) {
-    if (end <= start) {
-        return 0;
-    }
+static int process_run(jsp_pluck_state *state, jsp_slice_u8 run, int out_fd) {
     if (state->phase == JSP_PLUCK_STRING || state->phase == JSP_PLUCK_CONTAINER) {
-        return jsp_write_all(out_fd, bytes + start, end - start);
+        return jsp_write_all(out_fd, run.ptr, run.len);
     }
 
-    size_t span_start = start; /* meaningful only once phase is JSP_PLUCK_SCALAR */
-    for (size_t i = start; i < end; i++) {
-        bool ws = is_json_ws(bytes[i]);
+    size_t span_start = 0; /* meaningful only once phase is JSP_PLUCK_SCALAR */
+    for (size_t i = 0; i < run.len; i++) {
+        bool ws = is_json_ws(run.ptr[i]);
         if (state->phase == JSP_PLUCK_SCALAR) {
             if (ws) {
-                if (jsp_write_all(out_fd, bytes + span_start, i - span_start) != 0) {
+                if (jsp_write_all(out_fd, run.ptr + span_start, i - span_start) != 0) {
                     return -1;
                 }
                 if (jsp_write_all(out_fd, (const unsigned char *)"\n", 1) != 0) {
@@ -54,14 +50,14 @@ static int process_run(jsp_pluck_state *state, const uint8_t *bytes, size_t star
         /* JSP_PLUCK_BETWEEN */
         if (!ws) {
             if (!state->shape_known) {
-                discover_shape(state, bytes[i]); /* never '[': that is always a mask bit */
+                discover_shape(state, run.ptr[i]); /* never '[': that is always a mask bit */
             }
             state->phase = JSP_PLUCK_SCALAR;
             span_start = i;
         }
     }
     if (state->phase == JSP_PLUCK_SCALAR) {
-        return jsp_write_all(out_fd, bytes + span_start, end - span_start);
+        return jsp_write_all(out_fd, run.ptr + span_start, run.len - span_start);
     }
     return 0;
 }
@@ -132,24 +128,11 @@ static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
     return 0;
 }
 
-int jsp_pluck_step(jsp_pluck_state *state, jsp_slice_u8 block, uint64_t mask, int out_fd) {
-    size_t pos = 0;
-    size_t len = block.len;
-    while (pos < len) {
-        uint64_t remaining = mask & (~(uint64_t)0 << pos);
-        if (remaining == 0) {
-            return process_run(state, block.ptr, pos, len, out_fd);
-        }
-        size_t bit = (size_t)__builtin_ctzll(remaining);
-        if (process_run(state, block.ptr, pos, bit, out_fd) != 0) {
-            return -1;
-        }
-        if (step_structural(state, block.ptr[bit], out_fd) != 0) {
-            return -1;
-        }
-        pos = bit + 1;
+int jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd) {
+    if (token.kind == JSP_TOKEN_RUN) {
+        return process_run(state, token.bytes, out_fd);
     }
-    return 0;
+    return step_structural(state, token.bytes.ptr[0], out_fd);
 }
 
 int jsp_pluck_finish(jsp_pluck_state *state, int out_fd) {

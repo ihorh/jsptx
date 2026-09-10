@@ -13,10 +13,11 @@ typedef enum {
     JSP_READER_ERROR, /* read(2) failed; errno is set */
 } jsp_reader_status;
 
-/* block is meaningful only when status is JSP_READER_BLOCK. */
+/* block and offset are meaningful only when status is JSP_READER_BLOCK. */
 typedef struct {
     jsp_reader_status status;
     jsp_slice_u8      block;
+    uint64_t          offset; /* of block.ptr[0] in the stream */
 } jsp_reader_result;
 
 /* Cuts a descriptor's bytes into fixed-width blocks.
@@ -26,12 +27,18 @@ typedef struct {
    must be a multiple of block_size, and at least one of them, which is what
    keeps a block inside the buffer.
 
-   pos is how much of buf.len has already been handed out. */
+   buf_offset is how far into buf the reader has handed out, so
+   buf_offset <= buf.len <= buf.cap, and compaction returns it to zero.
+   stream_offset is how far into the stream it has handed out, counted from
+   the first octet ever read and never reset, which is where the next block's
+   offset comes from. It is the wider type because a stream can outrun the
+   address space where a buffer cannot. */
 typedef struct {
     int        fd;
     jsp_buf_u8 buf;
     size_t     block_size;
-    size_t     pos;
+    size_t     buf_offset;    /* into buf; zeroed by compaction */
+    uint64_t   stream_offset; /* into the stream; never reset */
     bool       done; /* the trailing partial block, if any, has already been returned */
 } jsp_reader;
 
