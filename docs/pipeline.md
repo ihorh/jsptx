@@ -94,7 +94,30 @@ and three tests included it. The alternatives, for the record:
 - **(c) `run.c` becomes `jsp.c`.** One rename, every other file untouched, and
   a name that hides what the file drives.
 
-### Step 2 — `jsp_reader` Moves Out
+### Step 2 — `jsp_reader` Moves Out (landed, in three commits)
+
+Grew from one step into three once the maintainer asked what `jsp_reader`
+actually hides.
+
+**Delete `JSP_PAD`.** It was allocated in M0 for a classifier that did not
+exist yet, and no commit since has read or written those 64 bytes: every design
+compacts the remainder to the front before padding, so the padding lands inside
+`cap`. Verified by removing it and running the suite plus every input length 0
+to 200 at three buffer sizes under ASan and UBSan. `design.md` justified it by
+alignment while stating that alignment needs nothing, and the reader's comment
+justified it differently. Both went.
+
+**`jsp_block` becomes `jsp_slice`.** The struct was already a pointer and a
+length wearing a domain name. Naming it neutrally also unified the size type,
+since `len` was `unsigned` while the reader's own counters are `size_t`.
+
+**The reader moves to `jsp_reader.h`/`jsp_reader.c`, expressed in `jsp_buf`.**
+Block size and the filler byte became init parameters, so the reader stops
+holding the classifier's vector width as a constant, and stops holding the JSON
+fact that a space is not structural. `jsp_run` passes both, and the comment
+naming that fact now sits at the call site.
+
+
 
 `src/jsp_run.c:107-187` is already a self-contained struct with an init and a next.
 Moving it to `jsp_reader.h`/`jsp_reader.c` takes 81 of `run.c`'s 231 lines with
