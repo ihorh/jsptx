@@ -46,9 +46,12 @@ static inline jsp_buf_u8 jsp_buf_u8_make(uint8_t *ptr, size_t cap) {
     return (jsp_buf_u8){ptr, 0, cap};
 }
 
-/* Where the next write goes, and how much room is left for it. */
-static inline uint8_t *jsp_buf_u8_tail(jsp_buf_u8 b) { return b.ptr + b.len; }
-static inline size_t   jsp_buf_u8_room(jsp_buf_u8 b) { return b.cap - b.len; }
+/* The room past the data, as a buffer of its own: empty, and holding as much
+   capacity as the parent has left. Writing into it and then adding what was
+   written to the parent's len is how the parent grows. */
+static inline jsp_buf_u8 jsp_buf_u8_tail(jsp_buf_u8 b) {
+    return (jsp_buf_u8){b.ptr + b.len, 0, b.cap - b.len};
+}
 
 /* Drops the first n octets, moving what follows to the front. n is at most
    len, which every caller holds by construction. */

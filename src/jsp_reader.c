@@ -28,7 +28,8 @@ jsp_reader_result jsp_reader_next(jsp_reader *r) {
     r->pos = 0;
 
     for (;;) {
-        ssize_t n = read(r->fd, jsp_buf_u8_tail(r->buf), jsp_buf_u8_room(r->buf));
+        jsp_buf_u8 tail = jsp_buf_u8_tail(r->buf);
+        ssize_t    n = read(r->fd, tail.ptr, tail.cap);
         /* clang-format off */
         if (n < 0 && errno == EINTR) { continue; }  /* interrupted, retry */
         if (n < 0)                  { return (jsp_reader_result){.status = JSP_READER_ERROR}; }
