@@ -28,11 +28,11 @@ typedef struct {
 
    pos is how much of buf.len has already been handed out. */
 typedef struct {
-    int      fd;
-    jsp_buf_u8  buf;
-    size_t   block_size;
-    size_t   pos;
-    bool     done; /* the trailing partial block, if any, has already been returned */
+    int        fd;
+    jsp_buf_u8 buf;
+    size_t     block_size;
+    size_t     pos;
+    bool       done; /* the trailing partial block, if any, has already been returned */
 } jsp_reader;
 
 void jsp_reader_init(jsp_reader *r, int fd, jsp_buf_u8 buf, size_t block_size);

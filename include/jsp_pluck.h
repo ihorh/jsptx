@@ -1,8 +1,8 @@
 #ifndef JSP_PLUCK_H
 #define JSP_PLUCK_H
 
-#include "jsp_slice_u8.h"
 #include "jsp_depth.h"
+#include "jsp_slice_u8.h"
 
 #include <stdint.h>
 

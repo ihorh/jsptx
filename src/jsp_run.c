@@ -103,7 +103,7 @@ static inline jsp_result jsp_result_make_(jsp_status status) {
 }
 
 jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
-    size_t   cap = round_up_to(settings.buf_size, JSP_BLOCK);
+    size_t cap = round_up_to(settings.buf_size, JSP_BLOCK);
     /* Zeroed once, so no stage ever reads an indeterminate octet: the
        classifier takes JSP_BLOCK at a time whatever the block's length, and
        the trailing block's tail is shorter than that. Nothing downstream
@@ -130,8 +130,7 @@ jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
         if (next.status == JSP_READER_ERROR)    { result = JSP_ERR_IO; break; }
         /* clang-format on */
 
-        if (process_block(fds.out_fd, offset, next.block, settings.output,
-                          fds.trace_fd,
+        if (process_block(fds.out_fd, offset, next.block, settings.output, fds.trace_fd,
                           settings.trace, &string_state, &pluck_state) != 0) {
             result = JSP_ERR_BLOCK_PROCESS_TMP;
             break;
