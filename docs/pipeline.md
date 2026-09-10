@@ -35,7 +35,7 @@ Three stages, each a module, with trace as a log call rather than a stage.
 
 | Stage | Owns | Emits |
 |---|---|---|
-| `jsp_reader` | `read`, refill, the `0x20` pad | blocks |
+| `jsp_reader` | `read`, refill, cutting fixed-width blocks | blocks |
 | `jsp_scan` | classify, string mask, length trim, the ctz walk | tokens |
 | the mode | records, paths, output bytes | writes to `out_fd` |
 
@@ -57,12 +57,12 @@ touching the ones before it.
 | 0 | Close `pluck-identity` | none | — |
 | 1 | One-to-one headers and sources | none | navigability |
 | 2 | `jsp_reader` moves to its own module | none | `jsp_run.c` reads as a pipeline |
-| 3 | Trace becomes a module | none | `process_block` drops to six parameters |
-| 4 | **Decide: tokens now, or stage 3 first** | — | — |
+| 3 | ~~Trace becomes a module~~ | struck | see below |
+| 4 | ~~Decide: tokens now, or stage 3 first~~ | resolved: tokens now | — |
 | 5 | `jsp_scan` emits tokens | none | the loop reads as a flat verb list |
 | 6 | The plucker's own shape | none | nesting and naming |
 
-Steps 1 to 3 invent no abstraction. They move code that already exists into
+Steps 1 and 2 invent no abstraction. They move code that already exists into
 files that already have names. Step 5 is the only one that adds a concept, and
 step 4 exists so it gets decided with more information than today.
 
@@ -94,71 +94,78 @@ and three tests included it. The alternatives, for the record:
 - **(c) `run.c` becomes `jsp.c`.** One rename, every other file untouched, and
   a name that hides what the file drives.
 
-### Step 2 — `jsp_reader` Moves Out (landed, in three commits)
+### Step 2 — `jsp_reader` Moves Out (landed, in five commits)
 
-Grew from one step into three once the maintainer asked what `jsp_reader`
+Grew from one step into five once the maintainer asked what `jsp_reader`
 actually hides.
 
-**Delete `JSP_PAD`.** It was allocated in M0 for a classifier that did not
-exist yet, and no commit since has read or written those 64 bytes: every design
-compacts the remainder to the front before padding, so the padding lands inside
-`cap`. Verified by removing it and running the suite plus every input length 0
-to 200 at three buffer sizes under ASan and UBSan. `design.md` justified it by
-alignment while stating that alignment needs nothing, and the reader's comment
-justified it differently. Both went.
+**Delete `JSP_PAD`.** M0 allocated it for a classifier still unwritten, and
+every commit since has left those 64 octets untouched: every
+design compacts the remainder to the front before padding, so the padding lands
+inside `cap`. Verified by removing it and running the suite plus every input
+length 0 to 200 at three buffer sizes under ASan and UBSan. `design.md`
+justified it by alignment while stating that alignment needs nothing, and the
+reader's comment justified it differently. Both went.
 
-**`jsp_block` becomes `jsp_slice`.** The struct was already a pointer and a
-length wearing a domain name. Naming it neutrally also unified the size type,
-since `len` was `unsigned` while the reader's own counters are `size_t`.
+**`jsp_block` becomes `jsp_slice_u8`, joined by `jsp_buf_u8`.** The struct was
+already a pointer and a length wearing a domain name. The `_u8` says the span
+is octets, because this workspace will grow other slice types meaning other
+things, and a bare `jsp_slice` claims more than it delivers. The rename also
+unified the size type, since `len` was `unsigned` while the reader's counters
+are `size_t`. `CHAR_BIT == 8` became a build failure, spelled two ways since CI
+builds at c99 and c17.
 
-**The reader moves to `jsp_reader.h`/`jsp_reader.c`, expressed in `jsp_buf`.**
-Block size and the filler byte became init parameters, so the reader stops
-holding the classifier's vector width as a constant, and stops holding the JSON
-fact that a space is not structural. `jsp_run` passes both, and the comment
-naming that fact now sits at the call site.
+**The reader moves to `jsp_reader.h`/`jsp_reader.c`.** `block_size` became an
+init parameter, so the reader stops holding the classifier's vector width as a
+constant.
 
+**The reader stops filling the trailing block's tail.** Filling belongs to
+whoever knows what the octets mean, and the reader knows neither what reads
+them nor what would be inert to it. Nothing fills them now. The mask trim in
+`jsp_run` has discarded those bits since M1, so seven filler bytes, an absent
+fill, and a `0xAA`-poisoned buffer all produce identical output on all three
+channels.
+`calloc` replaces `malloc`, so no stage reads an indeterminate octet — that was
+the only thing filling ever bought.
 
+**`jsp_buf_u8_tail` returns a buffer rather than a pointer**, with
+`jsp_buf_u8_room` folded into it. One call instead of two, so a pointer from one
+buffer cannot be paired with a length from another.
 
-`src/jsp_run.c:107-187` is already a self-contained struct with an init and a next.
-Moving it to `jsp_reader.h`/`jsp_reader.c` takes 81 of `run.c`'s 231 lines with
-it, and gives the reader tests of its own.
+### Step 3 — Trace Becomes a Module (struck, 2026-09-10)
 
-Open inside this step: header-only inline, or a separate translation unit.
-`jsp_run` calls the reader once per 64 bytes, so the call costs nothing
-measurable. A separate unit keeps `read` and `EINTR` out of every includer.
-Recommended: separate unit.
+**Do not re-add this.** It said to move `emit_offsets`, `emit_mask`, and
+`emit_trace` into `jsp_trace.h`/`jsp_trace.c`, and it was in the plan for a bad
+reason: it dropped `process_block` from eight parameters to six, back when the
+parameter count was being read as the defect rather than the signal.
 
-### Step 3 — Trace Becomes a Module
+Three things kill it. Step 5 deletes `process_block`, which is trace's only
+call site, so relocating first decides where the calls go twice. No second
+consumer exists, and `tests/run_test.c` already drives trace through `jsp_run`'s
+descriptors rather than through the emit functions. And
+`.claude-notes/observability-and-io.md` holds the trace layer unsettled until a
+real use case shows where the boundaries fall — step 5 is that use case, so
+settling it first is the guess that note warns against.
 
-`emit_offsets`, `emit_mask`, and `emit_trace` (`src/jsp_run.c:33-69`) move to
-`jsp_trace.h`/`jsp_trace.c`, behind a handle built once from `jsp_fds` and
-`jsp_settings`. `process_block` drops `trace_fd` and `trace`, reaching six
-parameters.
+Step 5 absorbs it. Once tokens exist, `--offsets` is a call where the token is
+and `--masks` is a call where the mask is, which is what trace-as-logging means.
 
-This is where the second output channel stops shaping signatures.
-`.claude-notes/observability-and-io.md` holds three standing constraints.
-`jsp_run` injects the destination rather than hardcoding it. Core computes
-numbers and trace formats them. A benchmark build compiles trace out
-entirely.
+### Step 4 — The Decision Point (resolved, 2026-09-10)
 
-The compile-out mechanism is deferred to whenever the benchmark measures a
-cost. Building it now would repeat the M3 mistake in a smaller way.
+The question was whether `jsp_scan` should wait for `plucker.md` stage 3, so
+that path matching exists as a second caller before the token stream is shaped
+around the plucker alone.
 
-### Step 4 — The Decision Point
+It collapses under the rule in "Too Late, Too Early". A `jsp_token` carrying a
+run of octets or one structural octet makes `jsp_scan` an iterator over set bits
+in a mask: a primitive, and a primitive earns its place on reading better rather
+than on a second caller. `jsp_slice_u8` landed on the same argument.
 
-`jsp_scan` has exactly one consumer today, the plucker. `plucker.md` stage 3
-adds the second, path matching, and that is what actually tests whether runs
-and structural bytes are the right vocabulary.
+**The condition, and it binds.** The token stays RUN and STRUCTURAL. A kind
+naming something the program decides — `JSP_TOKEN_KEY`, `JSP_TOKEN_RECORD_START`
+— moves `jsp_token` out of the primitive row, and the two-caller bar returns.
 
-- **(a) Tokens first, then stage 3.** Stage 3 is written once, against the
-  shape it will keep. Risk: the token stream is designed for one caller, which
-  is the M3 pattern.
-- **(b) Stage 3 first, then tokens.** The second caller exists before the
-  abstraction serving both. Risk: stage 3 lands on the shape being rejected
-  now, so the refactor afterwards touches more code than it would today.
-
-No recommendation yet. Steps 1 to 3 change what `run.c` looks like, and this
-choice is easier to make once it looks like that.
+So: step 5 now, stage 3 after it.
 
 ### Step 5 — `jsp_scan` Emits Tokens
 
@@ -227,13 +234,13 @@ again. Keeping the token dumb is what keeps step 5 cheap.
 
 These check that a step landed. None of them is a reason to take one.
 
-| Measure | Today | After |
-|---|---|---|
-| `process_block` parameters | 8 | gone by step 5 |
-| `run.c` lines | 231 | ~90 by step 3 |
-| Deepest nesting in `pluck.c` | 4 | 2 by step 6 |
-| Files whose `.c` matches its `.h` | 1 of 5 | 5 of 5 by step 1 |
-| Consumers writing a mask walk | 1 | 0 by step 5 |
+| Measure | At the start | Now | Target |
+|---|---|---|---|
+| `process_block` parameters | 8 | 8 | gone by step 5 |
+| `jsp_run.c` lines | 231 | 149 | — |
+| Deepest nesting in `jsp_pluck.c` | 4 | 4 | 2 by step 6 |
+| Files whose `.c` matches its `.h` | 1 of 5 | 6 of 6 | held |
+| Consumers writing a mask walk | 1 | 1 | 0 by step 5 |
 
 `zig build test` stays green at every step, and the fixtures agree at
 `--buf-size=64` and `--buf-size=4096`, carrying M1's cross-buffer-size
