@@ -1,7 +1,7 @@
 #ifndef JSP_PLUCK_H
 #define JSP_PLUCK_H
 
-#include "jsp_slice.h"
+#include "jsp_slice_u8.h"
 #include "jsp_depth.h"
 
 #include <stdint.h>
@@ -35,7 +35,7 @@ typedef struct {
    same block, trimmed to block.len the way process_block already trims it
    for the offset stream. Returns 0, or -1 on a write error or on malformed
    input: unbalanced or mismatched brackets, or nesting past JSP_MAX_DEPTH. */
-int jsp_pluck_step(jsp_pluck_state *state, jsp_slice block, uint64_t mask, int out_fd);
+int jsp_pluck_step(jsp_pluck_state *state, jsp_slice_u8 block, uint64_t mask, int out_fd);
 
 /* Closes a bare scalar record left in flight when the stream ends exactly
    where it stands: jsp_pluck_step only ever closes a scalar on a following

@@ -132,7 +132,7 @@ static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
     return 0;
 }
 
-int jsp_pluck_step(jsp_pluck_state *state, jsp_slice block, uint64_t mask, int out_fd) {
+int jsp_pluck_step(jsp_pluck_state *state, jsp_slice_u8 block, uint64_t mask, int out_fd) {
     size_t pos = 0;
     size_t len = block.len;
     while (pos < len) {
