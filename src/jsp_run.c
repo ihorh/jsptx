@@ -16,15 +16,16 @@
 /* One classification covers JSP_BLOCK bytes. */
 #define JSP_BLOCK 64
 
-static size_t round_up_block(size_t n) {
-    if (n < JSP_BLOCK) {
-        return JSP_BLOCK;
+/* The smallest multiple of `multiple` that is at least n, and never zero. */
+static size_t round_up_to(size_t n, size_t multiple) {
+    if (n < multiple) {
+        return multiple;
     }
-    return (n + JSP_BLOCK - 1) / JSP_BLOCK * JSP_BLOCK;
+    return (n + multiple - 1) / multiple * multiple;
 }
 
 /* One line per set bit in mask: "<offset + bit>\t<block.ptr[bit]>\n". */
-static int emit_offsets(int out_fd, uint64_t offset, jsp_slice block, uint64_t mask) {
+static int emit_offsets(int out_fd, uint64_t offset, jsp_slice_u8 block, uint64_t mask) {
     while (mask != 0) {
         int bit = __builtin_ctzll(mask);
         mask &= mask - 1;
@@ -48,7 +49,7 @@ static int emit_mask(int out_fd, uint64_t offset, uint64_t mask) {
 
 /* trace's inspection stream for one block, to trace_fd: independent of
    whatever mode is doing with the same block's mask on out_fd. */
-static int emit_trace(int trace_fd, uint64_t offset, jsp_slice block, uint64_t mask,
+static int emit_trace(int trace_fd, uint64_t offset, jsp_slice_u8 block, uint64_t mask,
                       jsp_trace_mode trace) {
     switch (trace) {
     case JSP_TRACE_OFFSETS:
@@ -69,7 +70,7 @@ static int emit_trace(int trace_fd, uint64_t offset, jsp_slice block, uint64_t m
    string_state carries in_string and trailing_backslash_unpaired across calls, one call
    per block in stream order, padding included, since jsp_string_mask reads
    every byte of block.ptr regardless of len. */
-static int process_block(int out_fd, uint64_t offset, jsp_slice block, jsp_output_mode mode,
+static int process_block(int out_fd, uint64_t offset, jsp_slice_u8 block, jsp_output_mode mode,
                          int trace_fd, jsp_trace_mode trace, jsp_string_state *string_state,
                          jsp_pluck_state *pluck_state) {
     assert(block.len >= 1 && block.len <= JSP_BLOCK);
@@ -102,15 +103,19 @@ static inline jsp_result jsp_result_make_(jsp_status status) {
 }
 
 jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
-    size_t   cap = round_up_block(settings.buf_size);
-    uint8_t *buf = malloc(cap);
+    size_t   cap = round_up_to(settings.buf_size, JSP_BLOCK);
+    /* Zeroed once, so no stage ever reads an indeterminate octet: the
+       classifier takes JSP_BLOCK at a time whatever the block's length, and
+       the trailing block's tail is shorter than that. Nothing downstream
+       reads meaning into those octets, since the mask trim below drops every
+       bit they produce. */
+    uint8_t *buf = calloc(cap, 1);
     if (buf == NULL) {
         return jsp_result_make_(JSP_ERR_ALLOC);
     }
 
-    /* A space is not structural, so a padded tail reports nothing. */
     jsp_reader reader;
-    jsp_reader_init(&reader, fds.in_fd, jsp_buf_make(buf, cap), JSP_BLOCK, 0x20);
+    jsp_reader_init(&reader, fds.in_fd, jsp_buf_u8_make(buf, cap), JSP_BLOCK);
 
     uint64_t   offset = 0;
     jsp_status result = JSP_OK;
@@ -124,7 +129,9 @@ jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
         if (next.status == JSP_READER_END)      { break; }
         if (next.status == JSP_READER_ERROR)    { result = JSP_ERR_IO; break; }
         /* clang-format on */
-        if (process_block(fds.out_fd, offset, next.block, settings.output, fds.trace_fd,
+
+        if (process_block(fds.out_fd, offset, next.block, settings.output,
+                          fds.trace_fd,
                           settings.trace, &string_state, &pluck_state) != 0) {
             result = JSP_ERR_BLOCK_PROCESS_TMP;
             break;
