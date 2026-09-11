@@ -55,10 +55,7 @@ jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
         }
     }
 
-    if (result == JSP_OK && plucking) {
-        result = jsp_pluck_finish(&pluck_state, fds.out_fd) == 0 ? JSP_OK
-                                                                 : JSP_ERR_BLOCK_PROCESS_TMP;
-    }
+    jsp_write_newline(fds.out_fd);
 
     free(buf);
     return jsp_result_make_(result);

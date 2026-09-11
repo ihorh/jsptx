@@ -26,24 +26,17 @@ typedef struct {
     _Bool    shape_known; /* whether the stream's first non-whitespace byte has been seen */
     _Bool    unwrap; /* the whole stream is one top-level array; its elements are records */
     unsigned record_depth; /* the depth records sit at: 0, or 1 once unwrap */
+    bool record_seen; /* whether a record has started; every later one gets a newline first */
     jsp_depth_state depth;
 } jsp_pluck_state;
 
-/* Takes one token, writing each record's own bytes verbatim, terminated by a
-   newline, straight to out_fd, with no key path applied: jsptx . prints every
-   record whole. Call once per token from jsp_scan_next, in order, for every
+/* Takes one token, writing each record's own bytes verbatim straight to
+   out_fd, with a newline before every record but the first; jsp_run writes
+   the last one. No key path is applied: jsptx . prints every record
+   whole. Call once per token from jsp_scan_next, in order, for every
    RUN and STRUCTURAL the stream yields. Returns 0, or -1 on a write error or
    on malformed input: unbalanced or mismatched brackets, or nesting past
    JSP_MAX_DEPTH. */
 int jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd);
-
-/* Closes a bare scalar record left in flight when the stream ends exactly
-   where it stands: jsp_pluck_step only ever closes a scalar on a following
-   whitespace or structural byte, and end of input supplies neither. A
-   no-op in every other phase, since a string or container record always
-   closes synchronously on its own terminating byte. Call once, after the
-   last call to jsp_pluck_step for a stream. Returns 0, or -1 on a write
-   error. */
-int jsp_pluck_finish(jsp_pluck_state *state, int out_fd);
 
 #endif /* JSP_PLUCK_H */

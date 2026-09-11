@@ -247,10 +247,9 @@ static void run_fixture(const char *name, size_t buf_size) {
     free(run.out);
 }
 
-/* jsp_pluck_finish's own reason to exist: a bare scalar with nothing after
-   it, ending exactly on a 64-byte block boundary, so the reader's last
-   block is the full one and the loop breaks on JSP_SCAN_END with no
-   further block to trigger the scalar's close. */
+/* A bare scalar with nothing after it, ending exactly on a 64-byte block
+   boundary, so the reader's last block is the full one and the loop breaks
+   on JSP_SCAN_END with no further block to trigger the scalar's close. */
 static void test_scalar_on_block_boundary(void) {
     uint8_t input[64];
     memset(input, ' ', sizeof(input) - 1);
