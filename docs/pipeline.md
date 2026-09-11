@@ -161,13 +161,13 @@ run of octets or one structural octet makes `jsp_scan` an iterator over set bits
 in a mask: a primitive, and a primitive earns its place on reading better rather
 than on a second caller. `jsp_slice_u8` landed on the same argument.
 
-**The condition, and it binds.** The token stays RUN and STRUCTURAL. A kind
+**The condition, and it binds.** The token stays BYTES and STRUCTURAL. A kind
 naming something the program decides — `JSP_TOKEN_KEY`, `JSP_TOKEN_RECORD_START`
 — moves `jsp_token` out of the primitive row, and the two-caller bar returns.
 
 So: step 5 now, stage 3 after it.
 
-### Step 5 — `jsp_scan` Emits Tokens
+### Step 5 — `jsp_scan` Emits Tokens (landed)
 
 `process_block` and `process_finish` disappear. `jsp_run`'s loop pulls tokens,
 traces, and pushes. The plucker's bit walk (`src/jsp_pluck.c:136-149`) deletes.
@@ -187,6 +187,9 @@ On modes, once tokens exist: `jsp_run` switches on `settings.output` once and
 each mode runs its own loop, declaring exactly the state it needs. A third mode
 adds a loop rather than a parameter. The alternative is one tagged sink struct
 with a switch per token, which keeps one loop and pays an indirection.
+
+As landed, neither: one loop, with `plucking` gating the push. Two modes pay
+for neither shape, so a third mode is the point to pick one.
 
 ### Step 6 — The Plucker's Own Shape
 
@@ -236,11 +239,11 @@ These check that a step landed. None of them is a reason to take one.
 
 | Measure | At the start | Now | Target |
 |---|---|---|---|
-| `process_block` parameters | 8 | 8 | gone by step 5 |
-| `jsp_run.c` lines | 231 | 149 | — |
+| `process_block` parameters | 8 | gone | gone by step 5 |
+| `jsp_run.c` lines | 231 | 62 | — |
 | Deepest nesting in `jsp_pluck.c` | 4 | 4 | 2 by step 6 |
-| Files whose `.c` matches its `.h` | 1 of 5 | 6 of 6 | held |
-| Consumers writing a mask walk | 1 | 1 | 0 by step 5 |
+| Files whose `.c` matches its `.h` | 1 of 5 | 8 of 8 | held |
+| Consumers writing a mask walk | 1 | 0 | 0 by step 5 |
 
 `zig build test` stays green at every step, and the fixtures agree at
 `--buf-size=64` and `--buf-size=4096`, carrying M1's cross-buffer-size
