@@ -40,7 +40,7 @@ static int process_run(jsp_pluck_state *state, jsp_slice_u8 run, int out_fd) {
                 if (jsp_write_all(out_fd, run.ptr + span_start, i - span_start) != 0) {
                     return -1;
                 }
-                if (jsp_write_all(out_fd, (const unsigned char *)"\n", 1) != 0) {
+                if (jsp_write_newline(out_fd) != 0) {
                     return -1;
                 }
                 state->phase = JSP_PLUCK_BETWEEN;
@@ -87,7 +87,7 @@ static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
            process_run only ever sees the whitespace case, so a scalar
            butting straight up against this mask bit closes here instead */
         state->phase = JSP_PLUCK_BETWEEN;
-        if (jsp_write_all(out_fd, (const unsigned char *)"\n", 1) != 0) {
+        if (jsp_write_newline(out_fd) != 0) {
             return -1;
         }
     }
@@ -99,7 +99,7 @@ static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
             return -1;
         }
         state->phase = JSP_PLUCK_BETWEEN;
-        return jsp_write_all(out_fd, (const unsigned char *)"\n", 1);
+        return jsp_write_newline(out_fd);
     }
 
     if (state->phase == JSP_PLUCK_CONTAINER) {
@@ -108,7 +108,7 @@ static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
         }
         if ((c == '}' || c == ']') && state->depth.depth == state->record_depth) {
             state->phase = JSP_PLUCK_BETWEEN;
-            return jsp_write_all(out_fd, (const unsigned char *)"\n", 1);
+            return jsp_write_newline(out_fd);
         }
         return 0;
     }
@@ -140,5 +140,5 @@ int jsp_pluck_finish(jsp_pluck_state *state, int out_fd) {
         return 0;
     }
     state->phase = JSP_PLUCK_BETWEEN;
-    return jsp_write_all(out_fd, (const unsigned char *)"\n", 1);
+    return jsp_write_newline(out_fd);
 }

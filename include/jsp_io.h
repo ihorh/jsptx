@@ -8,4 +8,8 @@
    real write error with errno set by the failing call. */
 int jsp_write_all(int fd, const unsigned char *buf, size_t len);
 
+static inline int jsp_write_newline(int fd) {
+    return jsp_write_all(fd, (const unsigned char *)"\n", 1);
+}
+
 #endif /* JSP_IO_H */

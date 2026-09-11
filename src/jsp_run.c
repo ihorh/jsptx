@@ -1,5 +1,6 @@
 #include "jsp_run.h"
 
+#include "jsp_io.h"
 #include "jsp_pluck.h"
 #include "jsp_scan.h"
 #include "jsp_slice_u8.h"
