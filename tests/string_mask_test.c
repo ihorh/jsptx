@@ -2,6 +2,7 @@
 #include "jsp_string_mask.h"
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 

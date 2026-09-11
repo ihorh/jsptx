@@ -1,5 +1,7 @@
 #include "jsp_string_mask.h"
 
+#include <stdbool.h>
+
 #define JSP_EVEN_BITS 0x5555555555555555ULL
 #define JSP_ODD_BITS 0xAAAAAAAAAAAAAAAAULL
 

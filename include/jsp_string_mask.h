@@ -3,7 +3,6 @@
 
 #include "jsp_classify.h"
 
-#include <stdbool.h>
 #include <stdint.h>
 
 /* The two bits that cross a block boundary and a refill: whether the byte
@@ -11,8 +10,8 @@
    an odd-length run of backslashes ending at the block's last byte. Zero-
    initialize for the first block of a stream. */
 typedef struct {
-    bool in_string;
-    bool trailing_backslash_unpaired;
+    _Bool in_string;
+    _Bool trailing_backslash_unpaired;
 } jsp_string_state;
 
 /* Turns off structural recognition inside strings. masks is jsp_classify_masks64's
