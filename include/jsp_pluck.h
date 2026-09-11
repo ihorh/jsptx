@@ -26,7 +26,7 @@ typedef struct {
     _Bool    shape_known; /* whether the stream's first non-whitespace byte has been seen */
     _Bool    unwrap; /* the whole stream is one top-level array; its elements are records */
     unsigned record_depth; /* the depth records sit at: 0, or 1 once unwrap */
-    bool record_seen; /* whether a record has started; every later one gets a newline first */
+    _Bool record_seen; /* whether a record has started; every later one gets a newline first */
     jsp_depth_state depth;
 } jsp_pluck_state;
 

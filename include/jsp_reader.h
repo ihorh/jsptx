@@ -3,7 +3,6 @@
 
 #include "jsp_slice_u8.h"
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -39,7 +38,7 @@ typedef struct {
     size_t     block_size;
     size_t     buf_offset;    /* into buf; zeroed by compaction */
     uint64_t   stream_offset; /* into the stream; never reset */
-    bool       done; /* the trailing partial block, if any, has already been returned */
+    _Bool      done; /* the trailing partial block, if any, has already been returned */
 } jsp_reader;
 
 void jsp_reader_init(jsp_reader *r, int fd, jsp_buf_u8 buf, size_t block_size);

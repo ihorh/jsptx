@@ -3,6 +3,7 @@
 #include "jsp_reader.h"
 
 #include <errno.h>
+#include <stdbool.h>
 #include <unistd.h>
 
 void jsp_reader_init(jsp_reader *r, int fd, jsp_buf_u8 buf, size_t block_size) {
