@@ -14,6 +14,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +26,12 @@ static const char *const FIXTURES[] = {
     "ndjson_objects", "array_unwrap", "bare_scalars",   "array_of_scalars",
     "strings",        "nested",       "block_boundary",
 };
+
+/* Bytes of context printed on each side of the first difference. */
+enum { DIFF_CONTEXT = 24 };
+
+static int cases;
+static int failures;
 
 /* Reads an entire file into a malloc'd buffer; *out_len is its size. Aborts
    on any error, since a missing or unreadable fixture is a broken test, not
@@ -91,19 +98,98 @@ static int open_sink(void) {
     return fd;
 }
 
-/* Runs one fixture at one buf_size and asserts jsp_run's record stream
-   matches the fixture's .expected file exactly. */
-static void run_fixture(const char *name, size_t buf_size) {
-    char json_path[256];
-    char expected_path[256];
-    snprintf(json_path, sizeof(json_path), "tests/data/pluck/%s.json", name);
-    snprintf(expected_path, sizeof(expected_path), "tests/data/pluck/%s.expected", name);
+static const char *status_name(jsp_status status) {
+    switch (status) {
+    case JSP_OK:
+        return "JSP_OK";
+    case JSP_ERR_ALLOC:
+        return "JSP_ERR_ALLOC";
+    case JSP_ERR_IO:
+        return "JSP_ERR_IO";
+    case JSP_ERR_BLOCK_PROCESS_TMP:
+        return "JSP_ERR_BLOCK_PROCESS_TMP";
+    }
+    return "(unknown jsp_status)";
+}
 
-    size_t   input_len;
-    uint8_t *input = read_file(json_path, &input_len);
-    size_t   want_len;
-    uint8_t *want = read_file(expected_path, &want_len);
+/* Writes buf[from, to), clamped to len, to stderr as a C string literal, so
+   a newline, or a missing one, shows up rather than shaping the output. An
+   ellipsis marks bytes cut off on either side. */
+static void print_window(const uint8_t *buf, size_t len, size_t from, size_t to) {
+    if (to > len) {
+        to = len;
+    }
+    fputs(from > 0 ? "...\"" : "\"", stderr);
+    for (size_t i = from; i < to; i++) {
+        uint8_t c = buf[i];
+        if (c == '\n') {
+            fputs("\\n", stderr);
+        } else if (c == '\t') {
+            fputs("\\t", stderr);
+        } else if (c == '"' || c == '\\') {
+            fprintf(stderr, "\\%c", c);
+        } else if (c < 0x20 || c >= 0x7f) {
+            fprintf(stderr, "\\x%02x", c);
+        } else {
+            fputc(c, stderr);
+        }
+    }
+    fputs(to < len ? "\"...\n" : "\"\n", stderr);
+}
 
+/* Checks one case's jsp_run status and output against want. On a mismatch it
+   reports the case by name, with the first differing byte and the bytes
+   around it on both sides, and counts a failure rather than aborting, so a
+   run shows every case a change breaks. */
+static void check_case(const char *name, jsp_result result, const uint8_t *got, size_t got_len,
+                       const uint8_t *want, size_t want_len) {
+    cases++;
+    bool ok = true;
+
+    if (result.status != JSP_OK) {
+        fprintf(stderr, "FAIL %s: jsp_run returned %s (sys_errno %d)\n", name,
+                status_name(result.status), result.sys_errno);
+        ok = false;
+    }
+
+    size_t common = got_len < want_len ? got_len : want_len;
+    size_t diff = 0;
+    while (diff < common && got[diff] == want[diff]) {
+        diff++;
+    }
+    if (diff < got_len || diff < want_len) {
+        size_t line = 1;
+        for (size_t i = 0; i < diff; i++) {
+            if (want[i] == '\n') {
+                line++;
+            }
+        }
+        fprintf(stderr,
+                "FAIL %s: got %zu bytes, want %zu; first difference at byte %zu, line %zu\n",
+                name, got_len, want_len, diff, line);
+        size_t from = diff > DIFF_CONTEXT ? diff - DIFF_CONTEXT : 0;
+        fputs("  got:  ", stderr);
+        print_window(got, got_len, from, diff + DIFF_CONTEXT);
+        fputs("  want: ", stderr);
+        print_window(want, want_len, from, diff + DIFF_CONTEXT);
+        ok = false;
+    }
+
+    if (!ok) {
+        failures++;
+    }
+}
+
+/* What jsp_run returned for one input, and what it wrote to out_fd. */
+typedef struct {
+    jsp_result result;
+    uint8_t   *out;
+    size_t     out_len;
+} pluck_run;
+
+/* Feeds input through a pipe into jsp_run in JSP_OUTPUT_PLUCK mode and
+   reads back the record stream. The caller frees .out. */
+static pluck_run run_pluck(const uint8_t *input, size_t input_len, size_t buf_size) {
     int in_pipe[2];
     assert(pipe(in_pipe) == 0);
     pid_t pid = fork();
@@ -120,106 +206,81 @@ static void run_fixture(const char *name, size_t buf_size) {
     jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1, .err_fd = -1};
     jsp_settings settings = {
         .buf_size = buf_size, .output = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
-    assert(jsp_run(fds, settings).status == JSP_OK);
+    pluck_run run = {.result = jsp_run(fds, settings)};
     close(in_pipe[0]);
 
     int status;
     assert(waitpid(pid, &status, 0) >= 0);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 
-    off_t got_size = lseek(out_fd, 0, SEEK_END);
-    assert(got_size >= 0);
-    uint8_t *got = malloc((size_t)got_size ? (size_t)got_size : 1);
-    assert(got != NULL);
+    off_t size = lseek(out_fd, 0, SEEK_END);
+    assert(size >= 0);
+    run.out_len = (size_t)size;
+    run.out = malloc(run.out_len ? run.out_len : 1);
+    assert(run.out != NULL);
     assert(lseek(out_fd, 0, SEEK_SET) == 0);
-    read_all_blocking(out_fd, got, (size_t)got_size);
+    read_all_blocking(out_fd, run.out, run.out_len);
     close(out_fd);
+    return run;
+}
 
-    if ((size_t)got_size != want_len || memcmp(got, want, want_len) != 0) {
-        fprintf(stderr, "pluck/%s at buf_size=%zu: got %jd bytes, want %zu\n", name, buf_size,
-                (intmax_t)got_size, want_len);
-        fprintf(stderr, "--- got ---\n%.*s--- want ---\n%.*s", (int)got_size, got,
-                (int)want_len, want);
-        abort();
-    }
+/* Runs one fixture at one buf_size and checks jsp_run's record stream
+   against the fixture's .expected file. */
+static void run_fixture(const char *name, size_t buf_size) {
+    char json_path[256];
+    char expected_path[256];
+    char case_name[256];
+    snprintf(json_path, sizeof(json_path), "tests/data/pluck/%s.json", name);
+    snprintf(expected_path, sizeof(expected_path), "tests/data/pluck/%s.expected", name);
+    snprintf(case_name, sizeof(case_name), "pluck/%s buf_size=%zu", name, buf_size);
+
+    size_t   input_len;
+    uint8_t *input = read_file(json_path, &input_len);
+    size_t   want_len;
+    uint8_t *want = read_file(expected_path, &want_len);
+
+    pluck_run run = run_pluck(input, input_len, buf_size);
+    check_case(case_name, run.result, run.out, run.out_len, want, want_len);
 
     free(input);
     free(want);
-    free(got);
+    free(run.out);
 }
 
 /* jsp_pluck_finish's own reason to exist: a bare scalar with nothing after
    it, ending exactly on a 64-byte block boundary, so the reader's last
-   block is the full one and the loop breaks on JSP_READER_END with no
+   block is the full one and the loop breaks on JSP_SCAN_END with no
    further block to trigger the scalar's close. */
 static void test_scalar_on_block_boundary(void) {
     uint8_t input[64];
     memset(input, ' ', sizeof(input) - 1);
     input[sizeof(input) - 1] = '7';
 
-    int in_pipe[2];
-    assert(pipe(in_pipe) == 0);
-    pid_t pid = fork();
-    assert(pid >= 0);
-    if (pid == 0) {
-        close(in_pipe[0]);
-        write_all_blocking(in_pipe[1], input, sizeof(input));
-        close(in_pipe[1]);
-        _exit(0);
-    }
-    close(in_pipe[1]);
-
-    int          out_fd = open_sink();
-    jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1, .err_fd = -1};
-    jsp_settings settings = {
-        .buf_size = 64, .output = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
-    assert(jsp_run(fds, settings).status == JSP_OK);
-    close(in_pipe[0]);
-
-    int status;
-    assert(waitpid(pid, &status, 0) >= 0);
-    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
-
     static const uint8_t want[] = "7\n";
-    off_t                got_size = lseek(out_fd, 0, SEEK_END);
-    assert(got_size == (off_t)(sizeof(want) - 1));
-    uint8_t got[8];
-    assert(lseek(out_fd, 0, SEEK_SET) == 0);
-    read_all_blocking(out_fd, got, (size_t)got_size);
-    close(out_fd);
-    assert(memcmp(got, want, (size_t)got_size) == 0);
+    pluck_run            run = run_pluck(input, sizeof(input), 64);
+    check_case("scalar_on_block_boundary buf_size=64", run.result, run.out, run.out_len, want,
+               sizeof(want) - 1);
+    free(run.out);
 }
 
 /* Depth errors (an unbalanced or mismatched closing bracket) fail the run
    rather than emitting a partial record. */
 static void test_malformed_input_fails(void) {
     static const uint8_t input[] = "}";
+    pluck_run            run = run_pluck(input, sizeof(input) - 1, 64);
 
-    int in_pipe[2];
-    assert(pipe(in_pipe) == 0);
-    pid_t pid = fork();
-    assert(pid >= 0);
-    if (pid == 0) {
-        close(in_pipe[0]);
-        write_all_blocking(in_pipe[1], input, sizeof(input) - 1);
-        close(in_pipe[1]);
-        _exit(0);
-    }
-    close(in_pipe[1]);
-
-    int          out_fd = open_sink();
-    jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1, .err_fd = -1};
-    jsp_settings settings = {
-        .buf_size = 64, .output = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
     /* JSP_ERR_BLOCK_PROCESS_TMP is the status today, but its name says it is
        a placeholder; what this test pins is that the run fails at all. */
-    assert(jsp_run(fds, settings).status != JSP_OK);
-    close(in_pipe[0]);
-    close(out_fd);
-
-    int status;
-    assert(waitpid(pid, &status, 0) >= 0);
-    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    cases++;
+    if (run.result.status == JSP_OK) {
+        fprintf(stderr, "FAIL malformed_input: jsp_run returned JSP_OK, want a failure\n");
+        fputs("  input: ", stderr);
+        print_window(input, sizeof(input) - 1, 0, sizeof(input) - 1);
+        fputs("  got:   ", stderr);
+        print_window(run.out, run.out_len, 0, run.out_len);
+        failures++;
+    }
+    free(run.out);
 }
 
 int main(void) {
@@ -234,6 +295,10 @@ int main(void) {
     test_scalar_on_block_boundary();
     test_malformed_input_fails();
 
+    if (failures > 0) {
+        fprintf(stderr, "pluck_test: %d of %d cases failed\n", failures, cases);
+        return 1;
+    }
     printf("ok\n");
     return 0;
 }

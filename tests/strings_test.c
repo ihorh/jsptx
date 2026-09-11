@@ -14,6 +14,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +26,12 @@ static const char *const FIXTURES[] = {
     "basic",          "escaped_quote",          "escaped_backslash", "odd_backslash_run",
     "block_boundary", "backslash_run_boundary",
 };
+
+/* Bytes of context printed on each side of the first difference. */
+enum { DIFF_CONTEXT = 24 };
+
+static int cases;
+static int failures;
 
 /* Reads an entire file into a malloc'd buffer; *out_len is its size. Aborts
    on any error, since a missing or unreadable fixture is a broken test, not
@@ -91,13 +98,97 @@ static int open_sink(void) {
     return fd;
 }
 
-/* Runs one fixture at one buf_size and asserts jsp_run's offset stream
-   matches the fixture's .expected file exactly. */
+static const char *status_name(jsp_status status) {
+    switch (status) {
+    case JSP_OK:
+        return "JSP_OK";
+    case JSP_ERR_ALLOC:
+        return "JSP_ERR_ALLOC";
+    case JSP_ERR_IO:
+        return "JSP_ERR_IO";
+    case JSP_ERR_BLOCK_PROCESS_TMP:
+        return "JSP_ERR_BLOCK_PROCESS_TMP";
+    }
+    return "(unknown jsp_status)";
+}
+
+/* Writes buf[from, to), clamped to len, to stderr as a C string literal, so
+   a newline, or a missing one, shows up rather than shaping the output. An
+   ellipsis marks bytes cut off on either side. */
+static void print_window(const uint8_t *buf, size_t len, size_t from, size_t to) {
+    if (to > len) {
+        to = len;
+    }
+    fputs(from > 0 ? "...\"" : "\"", stderr);
+    for (size_t i = from; i < to; i++) {
+        uint8_t c = buf[i];
+        if (c == '\n') {
+            fputs("\\n", stderr);
+        } else if (c == '\t') {
+            fputs("\\t", stderr);
+        } else if (c == '"' || c == '\\') {
+            fprintf(stderr, "\\%c", c);
+        } else if (c < 0x20 || c >= 0x7f) {
+            fprintf(stderr, "\\x%02x", c);
+        } else {
+            fputc(c, stderr);
+        }
+    }
+    fputs(to < len ? "\"...\n" : "\"\n", stderr);
+}
+
+/* Checks one case's jsp_run status and output against want. On a mismatch it
+   reports the case by name, with the first differing byte and the bytes
+   around it on both sides, and counts a failure rather than aborting, so a
+   run shows every case a change breaks. */
+static void check_case(const char *name, jsp_result result, const uint8_t *got, size_t got_len,
+                       const uint8_t *want, size_t want_len) {
+    cases++;
+    bool ok = true;
+
+    if (result.status != JSP_OK) {
+        fprintf(stderr, "FAIL %s: jsp_run returned %s (sys_errno %d)\n", name,
+                status_name(result.status), result.sys_errno);
+        ok = false;
+    }
+
+    size_t common = got_len < want_len ? got_len : want_len;
+    size_t diff = 0;
+    while (diff < common && got[diff] == want[diff]) {
+        diff++;
+    }
+    if (diff < got_len || diff < want_len) {
+        size_t line = 1;
+        for (size_t i = 0; i < diff; i++) {
+            if (want[i] == '\n') {
+                line++;
+            }
+        }
+        fprintf(stderr,
+                "FAIL %s: got %zu bytes, want %zu; first difference at byte %zu, line %zu\n",
+                name, got_len, want_len, diff, line);
+        size_t from = diff > DIFF_CONTEXT ? diff - DIFF_CONTEXT : 0;
+        fputs("  got:  ", stderr);
+        print_window(got, got_len, from, diff + DIFF_CONTEXT);
+        fputs("  want: ", stderr);
+        print_window(want, want_len, from, diff + DIFF_CONTEXT);
+        ok = false;
+    }
+
+    if (!ok) {
+        failures++;
+    }
+}
+
+/* Runs one fixture at one buf_size and checks jsp_run's offset stream
+   against the fixture's .expected file. */
 static void run_fixture(const char *name, size_t buf_size) {
     char json_path[256];
     char expected_path[256];
+    char case_name[256];
     snprintf(json_path, sizeof(json_path), "tests/data/strings/%s.json", name);
     snprintf(expected_path, sizeof(expected_path), "tests/data/strings/%s.expected", name);
+    snprintf(case_name, sizeof(case_name), "strings/%s buf_size=%zu", name, buf_size);
 
     size_t   input_len;
     uint8_t *input = read_file(json_path, &input_len);
@@ -120,7 +211,7 @@ static void run_fixture(const char *name, size_t buf_size) {
     jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = -1, .trace_fd = out_fd, .err_fd = -1};
     jsp_settings settings = {
         .buf_size = buf_size, .output = JSP_OUTPUT_SINK, .trace = JSP_TRACE_OFFSETS};
-    assert(jsp_run(fds, settings).status == JSP_OK);
+    jsp_result result = jsp_run(fds, settings);
     close(in_pipe[0]);
 
     int status;
@@ -135,13 +226,7 @@ static void run_fixture(const char *name, size_t buf_size) {
     read_all_blocking(out_fd, got, (size_t)got_size);
     close(out_fd);
 
-    if ((size_t)got_size != want_len || memcmp(got, want, want_len) != 0) {
-        fprintf(stderr, "strings/%s at buf_size=%zu: got %jd bytes, want %zu\n", name, buf_size,
-                (intmax_t)got_size, want_len);
-        fprintf(stderr, "--- got ---\n%.*s--- want ---\n%.*s", (int)got_size, got,
-                (int)want_len, want);
-        abort();
-    }
+    check_case(case_name, result, got, (size_t)got_size, want, want_len);
 
     free(input);
     free(want);
@@ -157,6 +242,10 @@ int main(void) {
         }
     }
 
+    if (failures > 0) {
+        fprintf(stderr, "strings_test: %d of %d cases failed\n", failures, cases);
+        return 1;
+    }
     printf("ok\n");
     return 0;
 }
