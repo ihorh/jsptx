@@ -34,7 +34,7 @@ typedef struct {
    out_fd, with a newline before every record but the first; jsp_run writes
    the last one. No key path is applied: jsptx . prints every record
    whole. Call once per token from jsp_scan_next, in order, for every
-   RUN and STRUCTURAL the stream yields. Returns 0, or -1 on a write error or
+   BYTES and STRUCTURAL the stream yields. Returns 0, or -1 on a write error or
    on malformed input: unbalanced or mismatched brackets, or nesting past
    JSP_MAX_DEPTH. */
 int jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd);

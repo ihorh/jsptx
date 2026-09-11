@@ -21,7 +21,7 @@
    boundary — would make this a vocabulary for one caller rather than an
    iterator over set bits. */
 typedef enum {
-    JSP_TOKEN_RUN,        /* bytes holds no structural octet */
+    JSP_TOKEN_BYTES,      /* bytes holds no structural octet */
     JSP_TOKEN_STRUCTURAL, /* bytes.len is 1, and it is one of { } [ ] : , " */
 } jsp_token_kind;
 
@@ -67,7 +67,7 @@ typedef struct {
 /* Turns a descriptor's octets into tokens: classify, mask off what a string
    quotes, trim the trailing block to its real length, and walk the set bits.
 
-   The block boundary stops here. A run split by a refill arrives as two runs,
+   The block boundary stops here. Bytes split by a refill arrive as two BYTES tokens,
    which a consumer copying octets or matching them incrementally handles
    without noticing.
 
@@ -85,7 +85,7 @@ typedef struct {
    trim clears every bit they produce. */
 void jsp_scan_init(jsp_scan *s, int fd, jsp_buf_u8 buf, jsp_trace trace);
 
-/* The next token, or the reason there is none. Never yields an empty run. */
+/* The next token, or the reason there is none. Never yields an empty BYTES token. */
 jsp_scan_result jsp_scan_next(jsp_scan *s);
 
 #endif /* JSP_SCAN_H */

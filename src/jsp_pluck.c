@@ -10,7 +10,7 @@ static bool is_json_ws(uint8_t c) { return c == ' ' || c == '\t' || c == '\n' ||
 
 /* The stream's shape is decided by its very first non-whitespace byte,
    wherever it turns up: a mask bit in jsp_pluck_step, or a bare scalar's
-   lead byte found scanning a run in process_run. A '[' there means the
+   lead byte found scanning a BYTES token in push_bytes. A '[' there means the
    whole stream is one top-level array to unwrap, and its elements, one
    depth in, are the records; anything else means depth 0 holds them. */
 static void discover_shape(jsp_pluck_state *state, uint8_t c) {
@@ -30,25 +30,25 @@ static int begin_record(jsp_pluck_state *state, jsp_pluck_phase phase, int out_f
     return jsp_write_newline(out_fd);
 }
 
-/* Handles one run: octets with no structural one among them, since those
+/* Handles one BYTES token: octets with no structural one among them, since those
    arrive as their own tokens and jsp_pluck_push routes them elsewhere. A
    string or container record's content needs no byte-level look at this
-   run at all, since only the record's own terminating mask bit can end it,
-   so the whole run is emitted verbatim in one write. Between records, and
-   inside a bare scalar, the run is where the transition actually happens:
+   token at all, since only the record's own terminating mask bit can end it,
+   so the whole token is emitted verbatim in one write. Between records, and
+   inside a bare scalar, the token is where the transition actually happens:
    whitespace ends a scalar, and a non-whitespace byte outside a bracket or
    quote starts one, so this scans byte by byte to find it. */
-static int process_run(jsp_pluck_state *state, jsp_slice_u8 run, int out_fd) {
+static int push_bytes(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
     if (state->phase == JSP_PLUCK_STRING || state->phase == JSP_PLUCK_CONTAINER) {
-        return jsp_write_all(out_fd, run.ptr, run.len);
+        return jsp_write_all(out_fd, bytes.ptr, bytes.len);
     }
 
     size_t span_start = 0; /* meaningful only once phase is JSP_PLUCK_SCALAR */
-    for (size_t i = 0; i < run.len; i++) {
-        bool ws = is_json_ws(run.ptr[i]);
+    for (size_t i = 0; i < bytes.len; i++) {
+        bool ws = is_json_ws(bytes.ptr[i]);
         if (state->phase == JSP_PLUCK_SCALAR) {
             if (ws) {
-                if (jsp_write_all(out_fd, run.ptr + span_start, i - span_start) != 0) {
+                if (jsp_write_all(out_fd, bytes.ptr + span_start, i - span_start) != 0) {
                     return -1;
                 }
                 state->phase = JSP_PLUCK_BETWEEN;
@@ -58,7 +58,7 @@ static int process_run(jsp_pluck_state *state, jsp_slice_u8 run, int out_fd) {
         /* JSP_PLUCK_BETWEEN */
         if (!ws) {
             if (!state->shape_known) {
-                discover_shape(state, run.ptr[i]); /* never '[': that is always a mask bit */
+                discover_shape(state, bytes.ptr[i]); /* never '[': that is always a mask bit */
             }
             if (begin_record(state, JSP_PLUCK_SCALAR, out_fd) != 0) {
                 return -1;
@@ -67,7 +67,7 @@ static int process_run(jsp_pluck_state *state, jsp_slice_u8 run, int out_fd) {
         }
     }
     if (state->phase == JSP_PLUCK_SCALAR) {
-        return jsp_write_all(out_fd, run.ptr + span_start, run.len - span_start);
+        return jsp_write_all(out_fd, bytes.ptr + span_start, bytes.len - span_start);
     }
     return 0;
 }
@@ -94,7 +94,7 @@ static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
 
     if (state->phase == JSP_PLUCK_SCALAR) {
         /* a bare scalar ends at the first whitespace or structural byte;
-           process_run only ever sees the whitespace case, so a scalar
+           push_bytes only ever sees the whitespace case, so a scalar
            butting straight up against this mask bit closes here instead */
         state->phase = JSP_PLUCK_BETWEEN;
     }
@@ -136,8 +136,8 @@ static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
 }
 
 int jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd) {
-    if (token.kind == JSP_TOKEN_RUN) {
-        return process_run(state, token.bytes, out_fd);
+    if (token.kind == JSP_TOKEN_BYTES) {
+        return push_bytes(state, token.bytes, out_fd);
     }
     return step_structural(state, token.bytes.ptr[0], out_fd);
 }
