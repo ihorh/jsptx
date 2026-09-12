@@ -32,10 +32,9 @@ typedef struct {
 } jsp_depth_state;
 
 /* Advances state by one structural character, one of { } [ ] : , " as
-   jsp_filter_structural_mask leaves them. ':', ',', and '"' never change
-   depth. On an ERROR result, state is left exactly as it was before c: the
-   caller stops there rather than continuing to interpret an already-invalid
-   stream. */
+   jsp_scan leaves them, with the ones inside strings already cleared. ':', ',', and '"' never
+   change depth. On an ERROR result, state is left exactly as it was before c: the caller stops
+   there rather than continuing to interpret an already-invalid stream. */
 static inline jsp_depth_result jsp_depth_step(jsp_depth_state *state, uint8_t c) {
     switch (c) {
     case '{':

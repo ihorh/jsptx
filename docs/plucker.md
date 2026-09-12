@@ -269,13 +269,13 @@ Each one is verified against the code rather than assumed.
    still emitting must terminate after the loop breaks, or the last value loses
    its newline in silence.
 2. **The byte walk bounds by `block.len`, never by 64.** `jsp_reader_next`
-   pads the trailing block past `len` with the filler byte `jsp_run` gave it. `process_block` clears those
-   bits from the mask (`src/jsp_run.c:80-82`), and a byte walk between mask bits
-   has no equivalent guard, so it would emit pad spaces.
-3. **`jsp_string_state.in_string` is an end-of-block value.**
-   `include/jsp_string_mask.h:18-30` updates it once per block, which makes it
-   wrong mid-block. Derive position inside a string from the quote bits the
-   walk already steps over.
+   pads the trailing block past `len` with the filler byte `jsp_run` gave it.
+   `jsp_scan_next` clears those bits from the mask with `low_bits`
+   (`src/jsp_scan.c`), and a byte walk between mask bits has no equivalent
+   guard, so it would emit pad spaces.
+3. **`jsp_scan_carry.in_string` is an end-of-block value.** `jsp_scan_next`
+   sets it once per block, which makes it wrong mid-block. Derive position
+   inside a string from the quote bits the walk already steps over.
 
 ## The Work, by Stage
 

@@ -1,5 +1,6 @@
 #include "jsp_scan.h"
 
+#include "jsp_bits.h"
 #include "jsp_classify.h"
 #include "jsp_reader.h"
 
@@ -24,7 +25,7 @@ static inline void advance(jsp_scan_window *w, size_t n) {
 void jsp_scan_init(jsp_scan *s, int fd, jsp_buf_u8 buf, jsp_trace trace) {
     jsp_reader_init(&s->reader, fd, buf, JSP_SCAN_BLOCK);
     s->trace = trace;
-    s->string = (jsp_string_state){0};
+    s->carry = (jsp_scan_carry){0};
     s->window = (jsp_scan_window){jsp_slice_u8_make(NULL, 0), 0, 0};
 }
 
@@ -55,16 +56,25 @@ jsp_scan_result jsp_scan_next(jsp_scan *s) {
         case JSP_READER_BLOCK:
             assert(next.block.len >= 1 && next.block.len <= JSP_SCAN_BLOCK);
 
-            jsp_char_masks         chars = jsp_classify_masks64(next.block.ptr);
-            jsp_string_mask_result strings = jsp_filter_structural_mask(chars, s->string);
-            s->string = (jsp_string_state){
-                .in_string = strings.in_string,
-                .trailing_backslash_unpaired = strings.trailing_backslash_unpaired,
-            };
+            jsp_char_masks chars = jsp_classify_masks64(next.block.ptr);
+            uint64_t       backslash = chars.backslash;
+            jsp_scan_carry carry = s->carry;
 
-            /* Drops the bits the classifier produced for octets past the block's
-               real length, which is what makes their value irrelevant. */
-            uint64_t mask = strings.structural & low_bits(next.block.len);
+            /* a run's odd positions escape the next octet; even ones are escaped themselves */
+            uint64_t parity = jsp_bits_run_parity(backslash, carry.trailing_backslash_unpaired);
+            /* parity marks the escaping octet, so the escaped one sits a position up */
+            uint64_t escaped = (parity << 1) | (carry.trailing_backslash_unpaired ? 1u : 0u);
+            /* only an unescaped quote bounds a string */
+            uint64_t quotes = chars.quote & ~escaped;
+            uint64_t spans = jsp_bits_prefix_xor(quotes, carry.in_string);
+            /* both of a string's own quotes sit outside the content they bound */
+            uint64_t inside = spans & ~quotes;
+
+            s->carry.trailing_backslash_unpaired = (parity >> 63) & 1;
+            s->carry.in_string = (spans >> 63) & 1;
+
+            /* structural octets inside a string are content; low_bits drops the pad octets */
+            uint64_t mask = chars.structural & ~inside & low_bits(next.block.len);
 
             s->window = (jsp_scan_window){next.block, mask, next.offset};
             if (jsp_trace_block(s->trace, next.offset, next.block, mask) != 0) {

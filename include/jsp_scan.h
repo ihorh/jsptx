@@ -3,7 +3,6 @@
 
 #include "jsp_reader.h"
 #include "jsp_slice_u8.h"
-#include "jsp_string_mask.h"
 #include "jsp_trace.h"
 
 #include <stddef.h>
@@ -64,6 +63,13 @@ typedef struct {
     uint64_t     offset;
 } jsp_scan_window;
 
+/* What one block's last octet decides and the next block's first octet needs.
+   Zero for the first block of a stream. */
+typedef struct {
+    _Bool in_string;                   /* the block ends inside a string */
+    _Bool trailing_backslash_unpaired; /* it ends on a backslash that escapes the next octet */
+} jsp_scan_carry;
+
 /* Turns a descriptor's octets into tokens: classify, mask off what a string
    quotes, trim the trailing block to its real length, and walk the set bits.
 
@@ -73,10 +79,10 @@ typedef struct {
 
    Zero-initialize nothing by hand; jsp_scan_init does it. */
 typedef struct {
-    jsp_reader       reader;
-    jsp_trace        trace;
-    jsp_string_state string;
-    jsp_scan_window  window;
+    jsp_reader      reader;
+    jsp_trace       trace;
+    jsp_scan_carry  carry;
+    jsp_scan_window window;
 } jsp_scan;
 
 /* buf must hold a multiple of JSP_SCAN_BLOCK octets, at least one of them, and
