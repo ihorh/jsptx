@@ -18,6 +18,33 @@ static inline jsp_scan_window jsp_scan_window_after(jsp_scan_window w, size_t n)
     };
 }
 
+/* Which of a block's octets JSON is using as structure: the classifier's
+   structural characters, less the ones a string quotes, less the padding past
+   the block's length. carry arrives holding what the previous block left
+   behind, and leaves holding what this one leaves the next. */
+static uint64_t structural_mask(jsp_slice_u8 block, jsp_scan_carry *carry) {
+    assert(block.len >= 1 && block.len <= JSP_SCAN_BLOCK);
+
+    jsp_char_masks chars = jsp_classify_masks64(block.ptr);
+    uint64_t       backslash = chars.backslash;
+
+    /* a run's odd backslashes escape the octet after them */
+    uint64_t parity = jsp_bits_run_parity(backslash, carry->trailing_backslash_unpaired);
+    /* move each escaping bit onto the octet it escapes */
+    uint64_t escaped = (parity << 1) | (carry->trailing_backslash_unpaired ? 1u : 0u);
+    /* an escaped quote is string content, so only the rest bound strings */
+    uint64_t quotes = chars.quote & ~escaped;
+    uint64_t spans = jsp_bits_prefix_xor(quotes, carry->in_string);
+    /* a string's own quotes stay outside the content they bound */
+    uint64_t inside = spans & ~quotes;
+
+    carry->in_string = (spans >> 63) & 1;
+    carry->trailing_backslash_unpaired = (parity >> 63) & 1;
+
+    /* keep the structure standing outside strings and inside the block */
+    return chars.structural & ~inside & jsp_bits_low_mask(block.len);
+}
+
 void jsp_scan_init(jsp_scan *s, int fd, jsp_buf_u8 buf, jsp_trace trace) {
     jsp_reader_init(&s->reader, fd, buf, JSP_SCAN_BLOCK);
     s->trace = trace;
@@ -34,30 +61,12 @@ jsp_scan_result jsp_scan_next(jsp_scan *s) {
         case JSP_READER_ERROR: return (jsp_scan_result){.status = JSP_SCAN_ERROR};
             /* clang-format on */
         case JSP_READER_BLOCK:
-            assert(next.block.len >= 1 && next.block.len <= JSP_SCAN_BLOCK);
-
-            jsp_char_masks chars = jsp_classify_masks64(next.block.ptr);
-            uint64_t       backslash = chars.backslash;
-            jsp_scan_carry carry = s->carry;
-
-            /* a run's odd backslashes escape the octet after them */
-            uint64_t parity = jsp_bits_run_parity(backslash, carry.trailing_backslash_unpaired);
-            /* move each escaping bit onto the octet it escapes */
-            uint64_t escaped = (parity << 1) | (carry.trailing_backslash_unpaired ? 1u : 0u);
-            /* an escaped quote is string content, so only the rest bound strings */
-            uint64_t quotes = chars.quote & ~escaped;
-            uint64_t spans = jsp_bits_prefix_xor(quotes, carry.in_string);
-            /* a string's own quotes stay outside the content they bound */
-            uint64_t inside = spans & ~quotes;
-
-            s->carry.trailing_backslash_unpaired = (parity >> 63) & 1;
-            s->carry.in_string = (spans >> 63) & 1;
-
-            /* keep the structure standing outside strings and inside the block */
-            uint64_t mask = chars.structural & ~inside & jsp_bits_low_mask(next.block.len);
-
-            s->window = (jsp_scan_window){next.block, mask, next.offset};
-            if (jsp_trace_block(s->trace, next.offset, next.block, mask) != 0) {
+            s->window = (jsp_scan_window){
+                .rest = next.block,
+                .mask = structural_mask(next.block, &s->carry),
+                .offset = next.offset,
+            };
+            if (jsp_trace_block(s->trace, next.offset, next.block, s->window.mask) != 0) {
                 return (jsp_scan_result){.status = JSP_SCAN_ERROR};
             }
         }
