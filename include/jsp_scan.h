@@ -63,8 +63,8 @@ typedef struct {
     uint64_t     offset;
 } jsp_scan_window;
 
-/* What one block's last octet decides and the next block's first octet needs.
-   Zero for the first block of a stream. */
+/* Two facts one block leaves behind for the next one. Both are zero for a
+   stream's first block. */
 typedef struct {
     _Bool in_string;                   /* the block ends inside a string */
     _Bool trailing_backslash_unpaired; /* it ends on a backslash that escapes the next octet */
