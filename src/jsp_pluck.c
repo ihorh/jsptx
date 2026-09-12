@@ -40,8 +40,9 @@ static void latch_shape(jsp_pluck_state *state, uint8_t c) {
     state->shape = c == '[' ? JSP_PLUCK_SHAPE_ARRAY : JSP_PLUCK_SHAPE_VALUES;
 }
 
-/* Enters phase for a record whose first byte BETWEEN has just found,
-   writing the newline that separates it from the record before, if any. */
+/* Starts a record at the byte the caller just found, entering phase. Every
+   record after the first gets the newline that separates it from the one
+   before. */
 static int begin_record(jsp_pluck_state *state, jsp_pluck_phase phase, int out_fd) {
     state->phase = phase;
     if (!state->record_seen) {
