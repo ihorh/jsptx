@@ -18,6 +18,17 @@ static void check(const char *what, uint64_t got, uint64_t want) {
     }
 }
 
+/* The lowest set bit's index, and 64 for a word with no bit set, which is the
+   case __builtin_ctzll itself leaves undefined. */
+static void check_trailing_zeros_counts_low_clear_bits(void) {
+    check("tz 0x0", jsp_bits_trailing_zeros(0x0), 64);
+    check("tz 0x1", jsp_bits_trailing_zeros(0x1), 0);
+    check("tz 0x2", jsp_bits_trailing_zeros(0x2), 1);
+    check("tz 0x18", jsp_bits_trailing_zeros(0x18), 3);
+    check("tz bit 63", jsp_bits_trailing_zeros((uint64_t)1 << 63), 63);
+    check("tz all ones", jsp_bits_trailing_zeros(~(uint64_t)0), 0);
+}
+
 /* Within one run of set bits, the 1st, 3rd, 5th bit and so on come back, so a
    lone bit survives, a pair keeps its first, and a triple keeps two. */
 static void check_run_parity_counts_from_each_run_start(void) {
@@ -65,6 +76,7 @@ static void check_prefix_xor_carries_an_open_region(void) {
 }
 
 int main(void) {
+    check_trailing_zeros_counts_low_clear_bits();
     check_run_parity_counts_from_each_run_start();
     check_run_parity_ignores_absolute_position();
     check_run_parity_inverts_a_continuing_run();

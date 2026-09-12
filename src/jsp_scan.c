@@ -34,7 +34,7 @@ void jsp_scan_init(jsp_scan *s, int fd, jsp_buf_u8 buf, jsp_trace trace) {
    next set bit, or the block's end when none is left. */
 static jsp_scan_result jsp_scan_emit(jsp_scan *s) {
     jsp_scan_window *w = &s->window;
-    size_t           edge = w->mask != 0 ? (size_t)__builtin_ctzll(w->mask) : w->rest.len;
+    size_t           edge = w->mask != 0 ? jsp_bits_trailing_zeros(w->mask) : w->rest.len;
 
     jsp_token token = {
         .kind = edge > 0 ? JSP_TOKEN_BYTES : JSP_TOKEN_STRUCTURAL,

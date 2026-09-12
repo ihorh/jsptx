@@ -1,5 +1,6 @@
 #include "jsp_trace.h"
 
+#include "jsp_bits.h"
 #include "jsp_io.h"
 
 #include <inttypes.h>
@@ -13,7 +14,7 @@ static int trace_masks(jsp_trace t, uint64_t offset, uint64_t mask) {
 
 static int trace_offsets(jsp_trace t, uint64_t offset, jsp_slice_u8 block, uint64_t mask) {
     while (mask != 0) {
-        unsigned bit = (unsigned)__builtin_ctzll(mask);
+        unsigned bit = jsp_bits_trailing_zeros(mask);
         mask &= mask - 1;
 
         char line[32];
