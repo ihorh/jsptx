@@ -240,7 +240,7 @@ These check that a step landed. None of them is a reason to take one.
 | Measure | At the start | Now | Target |
 |---|---|---|---|
 | `process_block` parameters | 8 | gone | gone by step 5 |
-| `jsp_run.c` lines | 231 | 62 | — |
+| `jsp_run.c` lines | 231 | 64 | — |
 | Deepest nesting in `jsp_pluck.c` | 4 | 2 | 2 by step 6 |
 | Files whose `.c` matches its `.h` | 1 of 5 | 8 of 8 | held |
 | Consumers writing a mask walk | 1 | 0 | 0 by step 5 |
@@ -248,3 +248,26 @@ These check that a step landed. None of them is a reason to take one.
 `zig build test` stays green at every step, and the fixtures agree at
 `--buf-size=64` and `--buf-size=4096`, carrying M1's cross-buffer-size
 criterion forward.
+
+## As Closed
+
+Every step is resolved and the plan is done. Steps 1, 2, 5, and 6 landed, step
+3 is struck, and step 4 chose tokens first. The measures above are the state at
+closing, re-measured rather than carried forward.
+
+The branch went past this plan in four ways, each judged on its own at the
+time:
+
+- `jsp_bits` exists as a module, holding `trailing_zeros`, `low_mask`,
+  `run_parity`, and `prefix_xor`, with its own test binary.
+- `jsp_string_mask` is deleted. Its escape and string passes live in
+  `structural_mask` inside `src/jsp_scan.c`, which takes the cross-block carry
+  as an in-out parameter.
+- `jsp_slice_u8` gained `first` and `empty` beside `after`, matching jcraft's
+  `jstr` contracts. `docs/c-style.md` records why those contracts stay
+  identical across repositories.
+- The plucker writes the newline before each record, and `jsp_pluck_finish` is
+  gone.
+
+Stage 3 in `docs/plucker.md` inherits one thing from here. It is the
+`jsp_pluck_shape` enum, and that stage replaces it with the depth stack.
