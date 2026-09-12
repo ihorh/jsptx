@@ -17,15 +17,21 @@ typedef enum {
     JSP_PLUCK_SCALAR,    /* a top-level bare number, true, false, or null */
 } jsp_pluck_phase;
 
+/* Where the records sit, latched from the stream's first non-whitespace
+   byte. */
+typedef enum {
+    JSP_PLUCK_SHAPE_UNKNOWN, /* no non-whitespace byte seen yet */
+    JSP_PLUCK_SHAPE_ARRAY,   /* one top-level array; its elements are the records */
+    JSP_PLUCK_SHAPE_VALUES,  /* the top-level values are the records */
+} jsp_pluck_shape;
+
 /* Carried across every block of a stream, one call per block, in order.
-   Zero-initialize for the first block: phase starts BETWEEN, the shape is
-   undiscovered, and depth starts empty, matching jsp_depth_state's own
+   Zero-initialize for the first block: phase starts BETWEEN, the shape
+   UNKNOWN, and depth empty, matching jsp_depth_state's own
    zero-initialization contract. */
 typedef struct {
     jsp_pluck_phase phase;
-    _Bool    shape_known; /* whether the stream's first non-whitespace byte has been seen */
-    _Bool    unwrap; /* the whole stream is one top-level array; its elements are records */
-    unsigned record_depth; /* the depth records sit at: 0, or 1 once unwrap */
+    jsp_pluck_shape shape;
     _Bool record_seen; /* whether a record has started; every later one gets a newline first */
     jsp_depth_state depth;
 } jsp_pluck_state;

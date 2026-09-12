@@ -33,6 +33,14 @@ static inline jsp_slice_u8 jsp_slice_u8_make(const uint8_t *ptr, size_t len) {
     return (jsp_slice_u8){ptr, len};
 }
 
+/* The view past s's first n octets: what is left to read, once n are read.
+   n == s.len gives an empty slice, the normal end of such a walk rather than
+   an error. */
+static inline jsp_slice_u8 jsp_slice_u8_after(jsp_slice_u8 s, size_t n) {
+    assert(n <= s.len);
+    return (jsp_slice_u8){s.ptr + n, s.len - n};
+}
+
 /* A borrowed, writable region: cap octets at ptr, of which the first len hold
    data. Owns nothing either. Carrying both sizes is the whole point, since a
    producer fills toward cap while a consumer reads len. */

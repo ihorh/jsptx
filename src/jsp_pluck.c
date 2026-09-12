@@ -8,15 +8,36 @@
 
 static bool is_json_ws(uint8_t c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
+/* How many of s's leading octets are JSON whitespace. */
+static size_t ws_prefix(jsp_slice_u8 s) {
+    size_t n = 0;
+    while (n < s.len && is_json_ws(s.ptr[n])) {
+        n++;
+    }
+    return n;
+}
+
+/* How many of s's leading octets belong to a bare scalar: everything before
+   the first whitespace, since a structural octet never reaches a BYTES token. */
+static size_t scalar_prefix(jsp_slice_u8 s) {
+    size_t n = 0;
+    while (n < s.len && !is_json_ws(s.ptr[n])) {
+        n++;
+    }
+    return n;
+}
+
 /* The stream's shape is decided by its very first non-whitespace byte,
-   wherever it turns up: a mask bit in jsp_pluck_step, or a bare scalar's
-   lead byte found scanning a BYTES token in push_bytes. A '[' there means the
-   whole stream is one top-level array to unwrap, and its elements, one
-   depth in, are the records; anything else means depth 0 holds them. */
-static void discover_shape(jsp_pluck_state *state, uint8_t c) {
-    state->shape_known = true;
-    state->unwrap = c == '[';
-    state->record_depth = state->unwrap ? 1 : 0;
+   wherever it turns up: a mask bit in push_structural, or a bare scalar's
+   lead byte in push_bytes. A '[' there means the whole stream is one
+   top-level array to unwrap, and its elements, one depth in, are the
+   records; anything else means depth 0 holds them. Every later call is a
+   no-op. */
+static void latch_shape(jsp_pluck_state *state, uint8_t c) {
+    if (state->shape != JSP_PLUCK_SHAPE_UNKNOWN) {
+        return;
+    }
+    state->shape = c == '[' ? JSP_PLUCK_SHAPE_ARRAY : JSP_PLUCK_SHAPE_VALUES;
 }
 
 /* Enters phase for a record whose first byte BETWEEN has just found,
@@ -30,44 +51,37 @@ static int begin_record(jsp_pluck_state *state, jsp_pluck_phase phase, int out_f
     return jsp_write_newline(out_fd);
 }
 
-/* Handles one BYTES token: octets with no structural one among them, since those
-   arrive as their own tokens and jsp_pluck_push routes them elsewhere. A
-   string or container record's content needs no byte-level look at this
-   token at all, since only the record's own terminating mask bit can end it,
-   so the whole token is emitted verbatim in one write. Between records, and
-   inside a bare scalar, the token is where the transition actually happens:
-   whitespace ends a scalar, and a non-whitespace byte outside a bracket or
-   quote starts one, so this scans byte by byte to find it. */
+/* Handles one BYTES token: octets with no structural one among them. A string or
+   container record's content needs no byte-level look, since only the
+   record's own terminating mask bit can end it, so the whole token goes out
+   in one write. Otherwise the token holds bare scalars between whitespace,
+   and each pass of the loop emits one of them. A scalar reaching the token's
+   end may continue into the next one, so it stays open. */
 static int push_bytes(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
     if (state->phase == JSP_PLUCK_STRING || state->phase == JSP_PLUCK_CONTAINER) {
         return jsp_write_all(out_fd, bytes.ptr, bytes.len);
     }
 
-    size_t span_start = 0; /* meaningful only once phase is JSP_PLUCK_SCALAR */
-    for (size_t i = 0; i < bytes.len; i++) {
-        bool ws = is_json_ws(bytes.ptr[i]);
-        if (state->phase == JSP_PLUCK_SCALAR) {
-            if (ws) {
-                if (jsp_write_all(out_fd, bytes.ptr + span_start, i - span_start) != 0) {
-                    return -1;
-                }
-                state->phase = JSP_PLUCK_BETWEEN;
-            }
-            continue;
-        }
-        /* JSP_PLUCK_BETWEEN */
-        if (!ws) {
-            if (!state->shape_known) {
-                discover_shape(state, bytes.ptr[i]); /* never '[': that is always a mask bit */
-            }
-            if (begin_record(state, JSP_PLUCK_SCALAR, out_fd) != 0) {
-                return -1;
-            }
-            span_start = i;
-        }
+    jsp_slice_u8 rest = bytes;
+    if (state->phase != JSP_PLUCK_SCALAR) {
+        rest = jsp_slice_u8_after(rest, ws_prefix(rest));
     }
-    if (state->phase == JSP_PLUCK_SCALAR) {
-        return jsp_write_all(out_fd, bytes.ptr + span_start, bytes.len - span_start);
+    while (rest.len > 0) {
+        latch_shape(state, rest.ptr[0]); /* never '[': that is always a mask bit */
+        if (state->phase == JSP_PLUCK_BETWEEN &&
+            begin_record(state, JSP_PLUCK_SCALAR, out_fd) != 0) {
+            return -1;
+        }
+        size_t n = scalar_prefix(rest);
+        if (jsp_write_all(out_fd, rest.ptr, n) != 0) {
+            return -1;
+        }
+        if (n == rest.len) {
+            return 0;
+        }
+        state->phase = JSP_PLUCK_BETWEEN;
+        rest = jsp_slice_u8_after(rest, n);
+        rest = jsp_slice_u8_after(rest, ws_prefix(rest));
     }
     return 0;
 }
@@ -75,13 +89,9 @@ static int push_bytes(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
 /* Handles one mask bit: one of { } [ ] : , " in stream order, exactly the
    set jsp_depth_step expects. Every one of them passes through depth
    tracking once, whatever phase it arrives in. */
-static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
-    bool opening_wrapper = false;
-    if (!state->shape_known) {
-        discover_shape(state, c);
-        opening_wrapper =
-            state->unwrap; /* true here means c == '[' by discover_shape's own test */
-    }
+static int push_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
+    bool opening_wrapper = state->shape == JSP_PLUCK_SHAPE_UNKNOWN && c == '[';
+    latch_shape(state, c);
 
     jsp_depth_result r = jsp_depth_step(&state->depth, c);
     if (r == JSP_DEPTH_ERROR_OVERFLOW || r == JSP_DEPTH_ERROR_MISMATCH ||
@@ -94,8 +104,8 @@ static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
 
     if (state->phase == JSP_PLUCK_SCALAR) {
         /* a bare scalar ends at the first whitespace or structural byte;
-           push_bytes only ever sees the whitespace case, so a scalar
-           butting straight up against this mask bit closes here instead */
+           push_bytes only ever sees the whitespace case, so a scalar butting
+           straight up against this mask bit closes here instead */
         state->phase = JSP_PLUCK_BETWEEN;
     }
 
@@ -110,7 +120,8 @@ static int step_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
         if (jsp_write_all(out_fd, &c, 1) != 0) {
             return -1;
         }
-        if ((c == '}' || c == ']') && state->depth.depth == state->record_depth) {
+        unsigned record_depth = state->shape == JSP_PLUCK_SHAPE_ARRAY ? 1u : 0u;
+        if ((c == '}' || c == ']') && state->depth.depth == record_depth) {
             state->phase = JSP_PLUCK_BETWEEN;
         }
         return 0;
@@ -139,5 +150,5 @@ int jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd) {
     if (token.kind == JSP_TOKEN_BYTES) {
         return push_bytes(state, token.bytes, out_fd);
     }
-    return step_structural(state, token.bytes.ptr[0], out_fd);
+    return push_structural(state, token.bytes.ptr[0], out_fd);
 }

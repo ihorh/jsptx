@@ -191,7 +191,7 @@ with a switch per token, which keeps one loop and pays an indirection.
 As landed, neither: one loop, with `plucking` gating the push. Two modes pay
 for neither shape, so a third mode is the point to pick one.
 
-### Step 6 — The Plucker's Own Shape
+### Step 6 — The Plucker's Own Shape (landed)
 
 Four levels of nesting and four weak names, addressed after the token stream
 settles what the plucker receives. Deliberately last, since its input decides
@@ -241,7 +241,7 @@ These check that a step landed. None of them is a reason to take one.
 |---|---|---|---|
 | `process_block` parameters | 8 | gone | gone by step 5 |
 | `jsp_run.c` lines | 231 | 62 | — |
-| Deepest nesting in `jsp_pluck.c` | 4 | 4 | 2 by step 6 |
+| Deepest nesting in `jsp_pluck.c` | 4 | 2 | 2 by step 6 |
 | Files whose `.c` matches its `.h` | 1 of 5 | 8 of 8 | held |
 | Consumers writing a mask walk | 1 | 0 | 0 by step 5 |
 
