@@ -8,7 +8,6 @@
 
 #include <assert.h>
 #include <errno.h>
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -41,7 +40,6 @@ jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
 
     jsp_status      result = JSP_OK;
     jsp_pluck_state pluck_state = {0};
-    bool            plucking = settings.output == JSP_OUTPUT_PLUCK;
 
     for (;;) {
         jsp_scan_result next = jsp_scan_next(&scan);
@@ -49,9 +47,13 @@ jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
         if (next.status == JSP_SCAN_END)   { break; }
         if (next.status == JSP_SCAN_ERROR) { result = JSP_ERR_IO; break; }
         /* clang-format on */
-        if (plucking && jsp_pluck_push(&pluck_state, next.token, fds.out_fd) != 0) {
-            result = JSP_ERR_BLOCK_PROCESS_TMP;
-            break;
+
+        if (settings.output == JSP_OUTPUT_PLUCK) {
+            int presult = jsp_pluck_push(&pluck_state, next.token, fds.out_fd);
+            if (presult != 0) {
+                result = JSP_ERR_BLOCK_PROCESS_TMP;
+                break;
+            }
         }
     }
 
