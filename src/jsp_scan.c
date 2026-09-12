@@ -26,7 +26,7 @@ void jsp_scan_init(jsp_scan *s, int fd, jsp_buf_u8 buf, jsp_trace trace) {
 }
 
 jsp_scan_result jsp_scan_next(jsp_scan *s) {
-    if (s->window.rest.len == 0) {
+    if (jsp_slice_u8_empty(s->window.rest)) {
         jsp_reader_result next = jsp_reader_next(&s->reader);
         switch (next.status) {
             /* clang-format off */
@@ -70,11 +70,11 @@ jsp_scan_result jsp_scan_next(jsp_scan *s) {
     token.offset = w.offset;
     if (edge > 0) {
         token.kind = JSP_TOKEN_BYTES;
-        token.bytes = jsp_slice_u8_make(w.rest.ptr, edge);
+        token.bytes = jsp_slice_u8_first(w.rest, edge);
     } else {
         /* a set bit at rest.ptr[0] makes that octet structural */
         token.kind = JSP_TOKEN_STRUCTURAL;
-        token.bytes = jsp_slice_u8_make(w.rest.ptr, 1);
+        token.bytes = jsp_slice_u8_first(w.rest, 1);
     }
     s->window = jsp_scan_window_after(w, token.bytes.len);
     return (jsp_scan_result){JSP_SCAN_TOKEN, token};

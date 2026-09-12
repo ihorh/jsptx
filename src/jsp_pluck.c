@@ -66,7 +66,7 @@ static int push_bytes(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
     if (state->phase != JSP_PLUCK_SCALAR) {
         rest = jsp_slice_u8_after(rest, ws_prefix(rest));
     }
-    while (rest.len > 0) {
+    while (!jsp_slice_u8_empty(rest)) {
         latch_shape(state, rest.ptr[0]); /* never '[': that is always a mask bit */
         if (state->phase == JSP_PLUCK_BETWEEN &&
             begin_record(state, JSP_PLUCK_SCALAR, out_fd) != 0) {

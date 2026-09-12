@@ -33,6 +33,18 @@ static inline jsp_slice_u8 jsp_slice_u8_make(const uint8_t *ptr, size_t len) {
     return (jsp_slice_u8){ptr, len};
 }
 
+/* Whether s has no octets to read. A NULL ptr counts as empty whatever len
+   says: that is a caller slip, and reporting it beats aborting inside a check.
+   Matches jstr_empty. */
+static inline _Bool jsp_slice_u8_empty(jsp_slice_u8 s) { return s.ptr == NULL || s.len == 0; }
+
+/* s's first n octets, or all of them when s is shorter. An n above s.len is
+   the normal way to ask for at most n, so it clamps rather than asserts.
+   Matches jstr_first. */
+static inline jsp_slice_u8 jsp_slice_u8_first(jsp_slice_u8 s, size_t n) {
+    return (jsp_slice_u8){s.ptr, n < s.len ? n : s.len};
+}
+
 /* The view past s's first n octets: what is left to read, once n are read.
    n == s.len gives an empty slice, the normal end of such a walk rather than
    an error. */
