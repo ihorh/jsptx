@@ -7,10 +7,6 @@
 
 #include <assert.h>
 
-/* The low len bits set. Written as a right shift because 1 << 64 is undefined
-   where ~0 >> 0 is not, and len reaches JSP_SCAN_BLOCK on every full block. */
-static inline uint64_t low_bits(size_t len) { return ~(uint64_t)0 >> (JSP_SCAN_BLOCK - len); }
-
 /* The window with all three of its parts past n octets, which is what holds
    its invariant true. jsp_slice_u8_after rejects an n past rest.len. */
 static inline jsp_scan_window jsp_scan_window_after(jsp_scan_window w, size_t n) {
@@ -58,7 +54,7 @@ jsp_scan_result jsp_scan_next(jsp_scan *s) {
             s->carry.in_string = (spans >> 63) & 1;
 
             /* keep the structure standing outside strings and inside the block */
-            uint64_t mask = chars.structural & ~inside & low_bits(next.block.len);
+            uint64_t mask = chars.structural & ~inside & jsp_bits_low_mask(next.block.len);
 
             s->window = (jsp_scan_window){next.block, mask, next.offset};
             if (jsp_trace_block(s->trace, next.offset, next.block, mask) != 0) {

@@ -21,6 +21,7 @@ word describes 64 octets of input.
 API
 ---
 
+    jsp_bits_low_mask(n)                        the low n bits set
     jsp_bits_trailing_zeros(bits)               index of the lowest set bit
     jsp_bits_run_parity(bits, starts_inverted)  each run's odd-numbered bits
     jsp_bits_prefix_xor(toggles, starts_on)     the span each toggle opens
@@ -33,6 +34,8 @@ than costing a call. All three need __builtin_ctzll, and the #error below
 rejects a compiler lacking it.
 */
 
+#include <assert.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #if defined(__has_builtin)
@@ -45,6 +48,17 @@ rejects a compiler lacking it.
 
 #define JSP_EVEN_BITS 0x5555555555555555ULL
 #define JSP_ODD_BITS 0xAAAAAAAAAAAAAAAAULL
+
+/* The low n bits set, and every bit above them clear. A caller uses it to
+   ignore the part of a word that describes nothing.
+
+   Written as a right shift because 1 << 64 is undefined where ~0 >> 0 is not,
+   and n reaches 64 whenever the word is fully described. n of 0 is rejected
+   rather than answered, since that shift is undefined too. */
+static inline uint64_t jsp_bits_low_mask(size_t n) {
+    assert(n >= 1 && n <= 64);
+    return ~(uint64_t)0 >> (64 - n);
+}
 
 /* Returns the index of the lowest set bit. A word with bit 0 set gives 0. An
    empty word gives 64.

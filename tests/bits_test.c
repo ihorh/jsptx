@@ -18,6 +18,14 @@ static void check(const char *what, uint64_t got, uint64_t want) {
     }
 }
 
+/* The low n bits, so one bit for n of 1 and the whole word for n of 64. */
+static void check_low_mask_covers_n_bits(void) {
+    check("low 1", jsp_bits_low_mask(1), 0x1);
+    check("low 4", jsp_bits_low_mask(4), 0xf);
+    check("low 63", jsp_bits_low_mask(63), ~(uint64_t)0 >> 1);
+    check("low 64", jsp_bits_low_mask(64), ~(uint64_t)0);
+}
+
 /* The lowest set bit's index, and 64 for a word with no bit set, which is the
    case __builtin_ctzll itself leaves undefined. */
 static void check_trailing_zeros_counts_low_clear_bits(void) {
@@ -76,6 +84,7 @@ static void check_prefix_xor_carries_an_open_region(void) {
 }
 
 int main(void) {
+    check_low_mask_covers_n_bits();
     check_trailing_zeros_counts_low_clear_bits();
     check_run_parity_counts_from_each_run_start();
     check_run_parity_ignores_absolute_position();
