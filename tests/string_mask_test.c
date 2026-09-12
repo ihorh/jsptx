@@ -10,9 +10,8 @@
    starting from a fresh state, and asserts the result. */
 static void check_block(const char *block64, uint64_t want) {
     assert(strlen(block64) == 64);
-    jsp_char_masks   masks = jsp_classify_masks64((const uint8_t *)block64);
-    jsp_string_state state = {0};
-    assert(jsp_filter_structural_mask(masks, &state) == want);
+    jsp_char_masks masks = jsp_classify_masks64((const uint8_t *)block64);
+    assert(jsp_filter_structural_mask(masks, (jsp_string_state){0}).structural == want);
 }
 
 /* Fills buf (at least 65 bytes) with text followed by 'x' padding out to 64
@@ -98,17 +97,17 @@ static void check_carries_across_blocks(void) {
        0-2 are structural characters that must still be suppressed. */
     char *b2 = pad(block2, "}}}\"{");
 
-    jsp_string_state state = {0};
-    jsp_char_masks   m1 = jsp_classify_masks64((const uint8_t *)block1);
-    uint64_t         got1 = jsp_filter_structural_mask(m1, &state);
-    assert(got1 == ((uint64_t)1 << 0)); /* only the opening quote survives */
-    assert(state.in_string == true);
+    jsp_char_masks         m1 = jsp_classify_masks64((const uint8_t *)block1);
+    jsp_string_mask_result r1 = jsp_filter_structural_mask(m1, (jsp_string_state){0});
+    assert(r1.structural == ((uint64_t)1 << 0)); /* only the opening quote survives */
+    assert(r1.in_string == true);
 
-    jsp_char_masks m2 = jsp_classify_masks64((const uint8_t *)b2);
-    uint64_t       got2 = jsp_filter_structural_mask(m2, &state);
+    jsp_string_state       state = {r1.in_string, r1.trailing_backslash_unpaired};
+    jsp_char_masks         m2 = jsp_classify_masks64((const uint8_t *)b2);
+    jsp_string_mask_result r2 = jsp_filter_structural_mask(m2, state);
     uint64_t want2 = ((uint64_t)1 << 3) | ((uint64_t)1 << 4); /* closing " and { after it */
-    assert(got2 == want2);
-    assert(state.in_string == false);
+    assert(r2.structural == want2);
+    assert(r2.in_string == false);
 }
 
 /* A backslash run split across a block boundary: block 1 ends with a single
@@ -124,21 +123,21 @@ static void check_backslash_run_carries_across_blocks(void) {
 
     char *b2 = pad(block2, "\"}\"{"); /* escaped quote, then a real close, then { after */
 
-    jsp_string_state state = {0};
-    jsp_char_masks   m1 = jsp_classify_masks64((const uint8_t *)block1);
-    jsp_filter_structural_mask(m1, &state);
-    assert(state.in_string == true);
-    assert(state.trailing_backslash_unpaired == true);
+    jsp_char_masks         m1 = jsp_classify_masks64((const uint8_t *)block1);
+    jsp_string_mask_result r1 = jsp_filter_structural_mask(m1, (jsp_string_state){0});
+    assert(r1.in_string == true);
+    assert(r1.trailing_backslash_unpaired == true);
 
-    jsp_char_masks m2 = jsp_classify_masks64((const uint8_t *)b2);
-    uint64_t       got2 = jsp_filter_structural_mask(m2, &state);
+    jsp_string_state       state = {r1.in_string, r1.trailing_backslash_unpaired};
+    jsp_char_masks         m2 = jsp_classify_masks64((const uint8_t *)b2);
+    jsp_string_mask_result r2 = jsp_filter_structural_mask(m2, state);
     /* byte 0 is the escaped quote (suppressed, not real), byte 1 '}' inside
        the string (suppressed), byte 2 the real closing quote (kept), byte 3
        '{' after the string (kept). */
     uint64_t want2 = ((uint64_t)1 << 2) | ((uint64_t)1 << 3);
-    assert(got2 == want2);
-    assert(state.in_string == false);
-    assert(state.trailing_backslash_unpaired == false);
+    assert(r2.structural == want2);
+    assert(r2.in_string == false);
+    assert(r2.trailing_backslash_unpaired == false);
 }
 
 int main(void) {

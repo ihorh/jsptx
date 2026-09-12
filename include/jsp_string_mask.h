@@ -14,18 +14,25 @@ typedef struct {
     _Bool trailing_backslash_unpaired;
 } jsp_string_state;
 
+/* What filtering one block yields: the corrected structural mask, and the
+   state at the end of the block, which the next block's call starts from. */
+typedef struct {
+    uint64_t structural;
+    _Bool    in_string;
+    _Bool    trailing_backslash_unpaired;
+} jsp_string_mask_result;
+
 /* Turns off structural recognition inside strings. masks is jsp_classify_masks64's
    result for the same 64 bytes: no separate scan of the block here, only
-   bit-parallel arithmetic on masks already computed. state carries in_string
-   and trailing_backslash_unpaired across calls, one call per block in stream
-   order, and is updated in place to the state at the end of this block.
+   bit-parallel arithmetic on masks already computed. state is the previous
+   block's end state, one call per block in stream order.
 
    A real (non-escaped) '"' always survives in the result, since it marks a
    string boundary rather than string content: an opening quote is not yet
    inside the string it starts, and a closing quote's own byte is excluded
    from the content it closes. Every other structural character strictly
    between a real opening and closing quote, and every escaped '"', is
-   cleared. Returns the corrected structural mask. */
-uint64_t jsp_filter_structural_mask(jsp_char_masks masks, jsp_string_state *state);
+   cleared. */
+jsp_string_mask_result jsp_filter_structural_mask(jsp_char_masks masks, jsp_string_state state);
 
 #endif /* JSP_STRING_MASK_H */

@@ -55,12 +55,16 @@ jsp_scan_result jsp_scan_next(jsp_scan *s) {
         case JSP_READER_BLOCK:
             assert(next.block.len >= 1 && next.block.len <= JSP_SCAN_BLOCK);
 
-            jsp_char_masks chars = jsp_classify_masks64(next.block.ptr);
-            uint64_t       mask = jsp_filter_structural_mask(chars, &s->string);
+            jsp_char_masks         chars = jsp_classify_masks64(next.block.ptr);
+            jsp_string_mask_result strings = jsp_filter_structural_mask(chars, s->string);
+            s->string = (jsp_string_state){
+                .in_string = strings.in_string,
+                .trailing_backslash_unpaired = strings.trailing_backslash_unpaired,
+            };
 
             /* Drops the bits the classifier produced for octets past the block's
                real length, which is what makes their value irrelevant. */
-            mask &= low_bits(next.block.len);
+            uint64_t mask = strings.structural & low_bits(next.block.len);
 
             s->window = (jsp_scan_window){next.block, mask, next.offset};
             if (jsp_trace_block(s->trace, next.offset, next.block, mask) != 0) {

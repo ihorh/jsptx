@@ -66,18 +66,19 @@ static uint64_t bit_toggle_mask(uint64_t toggles, bool starts_on) {
     return v;
 }
 
-uint64_t jsp_filter_structural_mask(jsp_char_masks masks, jsp_string_state *state) {
-    uint64_t bp = backslash_parity(masks.backslash, state->trailing_backslash_unpaired);
+jsp_string_mask_result
+jsp_filter_structural_mask(jsp_char_masks masks, jsp_string_state state) {
+    uint64_t bp = backslash_parity(masks.backslash, state.trailing_backslash_unpaired);
     /* escaped's bit j equals bp's bit j - 1. bp already means "byte i
        escapes byte i + 1," so shifting it up by one turns that into "byte j
        is escaped." */
-    uint64_t escaped = (bp << 1) | (state->trailing_backslash_unpaired ? 1u : 0u);
+    uint64_t escaped = (bp << 1) | (state.trailing_backslash_unpaired ? 1u : 0u);
     uint64_t real_quote_mask = masks.quote & ~escaped;
 
     /* Each real quote toggles whether we're inside a string; in_string_inclusive
        is the resulting inside/outside mask, with byte 0's starting state
        carried in from the previous block. */
-    uint64_t in_string_inclusive = bit_toggle_mask(real_quote_mask, state->in_string);
+    uint64_t in_string_inclusive = bit_toggle_mask(real_quote_mask, state.in_string);
 
     /* A real quote's own byte is never suppressed: an opening quote is not
        yet inside the string it starts, and a closing quote's byte is
@@ -86,8 +87,9 @@ uint64_t jsp_filter_structural_mask(jsp_char_masks masks, jsp_string_state *stat
        where a plain parity read would only get one of the two. */
     uint64_t bits_to_clear = in_string_inclusive & ~real_quote_mask;
 
-    state->trailing_backslash_unpaired = (bp >> 63) & 1;
-    state->in_string = (in_string_inclusive >> 63) & 1;
-
-    return masks.structural & ~bits_to_clear;
+    return (jsp_string_mask_result){
+        .structural = masks.structural & ~bits_to_clear,
+        .in_string = (in_string_inclusive >> 63) & 1,
+        .trailing_backslash_unpaired = (bp >> 63) & 1,
+    };
 }
