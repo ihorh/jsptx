@@ -1,6 +1,7 @@
 #include "jsp_scan.h"
 
 #include "jsp_classify.h"
+#include "jsp_reader.h"
 
 #include <assert.h>
 
@@ -27,21 +28,6 @@ void jsp_scan_init(jsp_scan *s, int fd, jsp_buf_u8 buf, jsp_trace trace) {
     s->window = (jsp_scan_window){jsp_slice_u8_make(NULL, 0), 0, 0};
 }
 
-/* Classifies one block into the window. No I/O and no control flow: the caller
-   holds the block already, and decides for itself what a missing one means. */
-static void jsp_scan_load(jsp_scan *s, jsp_slice_u8 block, uint64_t offset) {
-    assert(block.len >= 1 && block.len <= JSP_SCAN_BLOCK);
-
-    jsp_char_masks chars = jsp_classify_masks64(block.ptr);
-    uint64_t       mask = jsp_filter_structural_mask(chars, &s->string);
-
-    /* Drops the bits the classifier produced for octets past the block's real
-       length, which is what makes their value irrelevant. */
-    mask &= low_bits(block.len);
-
-    s->window = (jsp_scan_window){block, mask, offset};
-}
-
 /* The next token from the window, which the caller holds non-empty. A set bit
    at rest.ptr[0] makes that octet structural; otherwise the token reaches the
    next set bit, or the block's end when none is left. */
@@ -61,18 +47,25 @@ static jsp_scan_result jsp_scan_emit(jsp_scan *s) {
 jsp_scan_result jsp_scan_next(jsp_scan *s) {
     if (s->window.rest.len == 0) {
         jsp_reader_result next = jsp_reader_next(&s->reader);
-        if (next.status != JSP_READER_BLOCK) {
-            jsp_scan_status status =
-                next.status == JSP_READER_END ? JSP_SCAN_END : JSP_SCAN_ERROR;
-            return (jsp_scan_result){.status = status};
-        }
-        /* The reader never yields an empty block, so one load always supplies
-           an octet and this needs no loop. */
-        jsp_scan_load(s, next.block, next.offset);
+        switch (next.status) {
+            /* clang-format off */
+        case JSP_READER_END:   return (jsp_scan_result){.status = JSP_SCAN_END};
+        case JSP_READER_ERROR: return (jsp_scan_result){.status = JSP_SCAN_ERROR};
+            /* clang-format on */
+        case JSP_READER_BLOCK:
+            assert(next.block.len >= 1 && next.block.len <= JSP_SCAN_BLOCK);
 
-        jsp_scan_window w = s->window;
-        if (jsp_trace_block(s->trace, w.offset, w.rest, w.mask) != 0) {
-            return (jsp_scan_result){.status = JSP_SCAN_ERROR};
+            jsp_char_masks chars = jsp_classify_masks64(next.block.ptr);
+            uint64_t       mask = jsp_filter_structural_mask(chars, &s->string);
+
+            /* Drops the bits the classifier produced for octets past the block's
+               real length, which is what makes their value irrelevant. */
+            mask &= low_bits(next.block.len);
+
+            s->window = (jsp_scan_window){next.block, mask, next.offset};
+            if (jsp_trace_block(s->trace, next.offset, next.block, mask) != 0) {
+                return (jsp_scan_result){.status = JSP_SCAN_ERROR};
+            }
         }
     }
     return jsp_scan_emit(s);
