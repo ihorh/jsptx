@@ -42,14 +42,17 @@ static uint8_t *read_file(const char *path, size_t *out_len) {
         perror(path);
         abort();
     }
-    assert(fseek(f, 0, SEEK_END) == 0);
+    int sought = fseek(f, 0, SEEK_END);
+    assert(sought == 0);
     long size = ftell(f);
     assert(size >= 0);
-    assert(fseek(f, 0, SEEK_SET) == 0);
+    sought = fseek(f, 0, SEEK_SET);
+    assert(sought == 0);
 
     uint8_t *buf = malloc((size_t)size ? (size_t)size : 1);
     assert(buf != NULL);
-    assert(fread(buf, 1, (size_t)size, f) == (size_t)size);
+    size_t got_bytes = fread(buf, 1, (size_t)size, f);
+    assert(got_bytes == (size_t)size);
     fclose(f);
 
     *out_len = (size_t)size;
@@ -196,7 +199,8 @@ static void run_fixture(const char *name, size_t buf_size) {
     uint8_t *want = read_file(expected_path, &want_len);
 
     int in_pipe[2];
-    assert(pipe(in_pipe) == 0);
+    int piped = pipe(in_pipe);
+    assert(piped == 0);
     pid_t pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
@@ -214,15 +218,17 @@ static void run_fixture(const char *name, size_t buf_size) {
     jsp_result result = jsp_run(fds, settings);
     close(in_pipe[0]);
 
-    int status;
-    assert(waitpid(pid, &status, 0) >= 0);
+    int   status;
+    pid_t reaped = waitpid(pid, &status, 0);
+    assert(reaped >= 0);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 
     off_t got_size = lseek(out_fd, 0, SEEK_END);
     assert(got_size >= 0);
     uint8_t *got = malloc((size_t)got_size ? (size_t)got_size : 1);
     assert(got != NULL);
-    assert(lseek(out_fd, 0, SEEK_SET) == 0);
+    off_t rewound = lseek(out_fd, 0, SEEK_SET);
+    assert(rewound == 0);
     read_all_blocking(out_fd, got, (size_t)got_size);
     close(out_fd);
 

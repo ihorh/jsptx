@@ -42,14 +42,17 @@ static uint8_t *read_file(const char *path, size_t *out_len) {
         perror(path);
         abort();
     }
-    assert(fseek(f, 0, SEEK_END) == 0);
+    int sought = fseek(f, 0, SEEK_END);
+    assert(sought == 0);
     long size = ftell(f);
     assert(size >= 0);
-    assert(fseek(f, 0, SEEK_SET) == 0);
+    sought = fseek(f, 0, SEEK_SET);
+    assert(sought == 0);
 
     uint8_t *buf = malloc((size_t)size ? (size_t)size : 1);
     assert(buf != NULL);
-    assert(fread(buf, 1, (size_t)size, f) == (size_t)size);
+    size_t got = fread(buf, 1, (size_t)size, f);
+    assert(got == (size_t)size);
     fclose(f);
 
     *out_len = (size_t)size;
@@ -191,7 +194,8 @@ typedef struct {
    reads back the record stream. The caller frees .out. */
 static pluck_run run_pluck(const uint8_t *input, size_t input_len, size_t buf_size) {
     int in_pipe[2];
-    assert(pipe(in_pipe) == 0);
+    int piped = pipe(in_pipe);
+    assert(piped == 0);
     pid_t pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
@@ -209,8 +213,9 @@ static pluck_run run_pluck(const uint8_t *input, size_t input_len, size_t buf_si
     pluck_run run = {.result = jsp_run(fds, settings)};
     close(in_pipe[0]);
 
-    int status;
-    assert(waitpid(pid, &status, 0) >= 0);
+    int   status;
+    pid_t reaped = waitpid(pid, &status, 0);
+    assert(reaped >= 0);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 
     off_t size = lseek(out_fd, 0, SEEK_END);
@@ -218,7 +223,8 @@ static pluck_run run_pluck(const uint8_t *input, size_t input_len, size_t buf_si
     run.out_len = (size_t)size;
     run.out = malloc(run.out_len ? run.out_len : 1);
     assert(run.out != NULL);
-    assert(lseek(out_fd, 0, SEEK_SET) == 0);
+    off_t rewound = lseek(out_fd, 0, SEEK_SET);
+    assert(rewound == 0);
     read_all_blocking(out_fd, run.out, run.out_len);
     close(out_fd);
     return run;
