@@ -1,6 +1,7 @@
-#ifndef JSP_H
-#define JSP_H
+#ifndef JSP_RUN_H
+#define JSP_RUN_H
 
+#include "jsp_trace.h"
 #include "jstr.h"
 
 #include <stddef.h>
@@ -11,16 +12,6 @@ typedef enum {
                       */
     JSP_OUTPUT_PLUCK, /* one line per record: its own bytes verbatim, newline-terminated */
 } jsp_output_mode;
-
-/* jsp_run's inspection stream, to trace_fd, independent of mode: a run can
-   pluck to out_fd and trace the classification behind it to trace_fd at
-   the same time. All text output is observability, not the product; see
-   docs/design.md's "The Offset Stream Is Stable, the Mask Is Not". */
-typedef enum {
-    JSP_TRACE_NONE,
-    JSP_TRACE_OFFSETS, /* one line per structural character: "<offset>\t<char>\n" */
-    JSP_TRACE_MASKS,   /* one line per block: "<offset>\t<mask>\n" */
-} jsp_trace_mode;
 
 /* Where jsp_run reads, writes, and, eventually, reports: err_fd is not yet
    used by jsp_run itself. trace_fd is meaningful only when settings.trace
@@ -83,4 +74,4 @@ typedef struct {
    brackets, or nesting past JSP_MAX_DEPTH. */
 jsp_result jsp_run(jsp_fds fds, jsp_settings settings);
 
-#endif /* JSP_H */
+#endif /* JSP_RUN_H */
