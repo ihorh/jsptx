@@ -9,6 +9,8 @@
 static int trace_masks(jsp_trace t, uint64_t offset, uint64_t mask) {
     char line[40];
     int  len = snprintf(line, sizeof(line), "%" PRIu64 "\t%016" PRIx64 "\n", offset, mask);
+    /* 20 digits, a tab, 16 hex digits and a newline fit line, so len is a
+       positive count of what was written rather than what was wanted */
     return jsp_write_all(t.fd, (unsigned char *)line, (size_t)len);
 }
 
@@ -20,6 +22,7 @@ static int trace_offsets(jsp_trace t, uint64_t offset, jsp_slice_u8 block, uint6
         char line[32];
         int  len =
             snprintf(line, sizeof(line), "%" PRIu64 "\t%c\n", offset + bit, block.ptr[bit]);
+        /* one offset, a tab, one octet and a newline fit line, as above */
         if (jsp_write_all(t.fd, (unsigned char *)line, (size_t)len) != 0) {
             return -1;
         }

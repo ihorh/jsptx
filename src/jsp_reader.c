@@ -50,6 +50,7 @@ jsp_reader_result jsp_reader_next(jsp_reader *r) {
             return yield_(r, jsp_slice_u8_make(r->buf.ptr, r->buf.len));
         }
 
+        /* n is above zero, since every other case returned above */
         r->buf.len += (size_t)n;
         if (r->buf.len >= r->block_size) {
             return yield_(r, jsp_slice_u8_make(r->buf.ptr, r->block_size));
