@@ -95,8 +95,7 @@ static int push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
     latch_shape_(state, c);
 
     jsp_nesting_result r = jsp_nesting_step(&state->nesting, c);
-    if (r == JSP_NESTING_ERROR_OVERFLOW || r == JSP_NESTING_ERROR_MISMATCH ||
-        r == JSP_NESTING_ERROR_UNBALANCED) {
+    if (r != JSP_NESTING_OK) {
         return -1;
     }
     if (opening_wrapper) {

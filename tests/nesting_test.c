@@ -8,31 +8,29 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Feeds chars through state one at a time, asserting each yields the result
-   at the same index in results. */
-static void run_sequence(const char *chars, const jsp_nesting_result *results, size_t n) {
+/* Feeds chars through state one at a time, asserting each is accepted and
+   leaves the depth at the same index in depths. */
+static void run_sequence(const char *chars, const unsigned *depths, size_t n) {
     jsp_nesting_state state = {0};
     for (size_t i = 0; i < n; i++) {
-        jsp_nesting_result got = jsp_nesting_step(&state, (uint8_t)chars[i]);
-        assert(got == results[i]);
+        assert(jsp_nesting_step(&state, (uint8_t)chars[i]) == JSP_NESTING_OK);
+        assert(state.depth == depths[i]);
     }
 }
 
 static void test_empty_object(void) {
-    static const jsp_nesting_result want[] = {JSP_NESTING_OK, JSP_NESTING_BOUNDARY};
+    static const unsigned want[] = {1, 0};
     run_sequence("{}", want, 2);
 }
 
 static void test_empty_array(void) {
-    static const jsp_nesting_result want[] = {JSP_NESTING_OK, JSP_NESTING_BOUNDARY};
+    static const unsigned want[] = {1, 0};
     run_sequence("[]", want, 2);
 }
 
 static void test_nested_mixed(void) {
-    /* {[]} : push object, push array, pop array (depth still 1), pop object
-       (depth 0: the boundary). */
-    static const jsp_nesting_result want[] = {JSP_NESTING_OK, JSP_NESTING_OK, JSP_NESTING_OK,
-                                              JSP_NESTING_BOUNDARY};
+    /* {[]} : push object, push array, pop array, pop object. */
+    static const unsigned want[] = {1, 2, 1, 0};
     run_sequence("{[]}", want, 4);
 }
 
@@ -85,13 +83,10 @@ static void test_overflow_at_exactly_max_depth(void) {
     assert(state.depth == JSP_MAX_DEPTH - 1);
 }
 
-static void test_concatenated_records_each_reach_boundary(void) {
-    /* {}[]{} : three top-level values back to back, each its own boundary,
-       with no state surviving from one to the next. */
-    static const jsp_nesting_result want[] = {
-        JSP_NESTING_OK,       JSP_NESTING_BOUNDARY, JSP_NESTING_OK,
-        JSP_NESTING_BOUNDARY, JSP_NESTING_OK,       JSP_NESTING_BOUNDARY,
-    };
+static void test_concatenated_values_each_return_to_depth_zero(void) {
+    /* {}[]{} : three top-level values back to back, with no state surviving
+       from one to the next. */
+    static const unsigned want[] = {1, 0, 1, 0, 1, 0};
     run_sequence("{}[]{}", want, 6);
 }
 
@@ -103,7 +98,7 @@ int main(void) {
     test_mismatch();
     test_unbalanced();
     test_overflow_at_exactly_max_depth();
-    test_concatenated_records_each_reach_boundary();
+    test_concatenated_values_each_return_to_depth_zero();
 
     printf("ok\n");
     return 0;

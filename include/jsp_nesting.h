@@ -10,13 +10,11 @@
 #define JSP_MAX_DEPTH 64
 
 /* One structural character's effect on nesting. OK covers ':', ',', '"', and
-   every open bracket that did not overflow. BOUNDARY is a close bracket that
-   returned depth to zero: one complete top-level value ends there. The three
-   ERROR results are the ways a stream can violate bracket matching; the
-   caller's own offset for the character that triggered one locates it. */
+   every bracket that matched. The three ERROR results are the ways a stream
+   can violate bracket matching; the caller's own offset for the character
+   that triggered one locates it. */
 typedef enum {
     JSP_NESTING_OK,
-    JSP_NESTING_BOUNDARY,
     JSP_NESTING_ERROR_OVERFLOW,   /* an open bracket past JSP_MAX_DEPTH */
     JSP_NESTING_ERROR_MISMATCH,   /* a close bracket does not match its container */
     JSP_NESTING_ERROR_UNBALANCED, /* a close bracket with no open container */
@@ -55,7 +53,7 @@ static inline jsp_nesting_result jsp_nesting_step(jsp_nesting_state *state, uint
         }
         state->stack >>= 1;
         state->depth--;
-        return state->depth == 0 ? JSP_NESTING_BOUNDARY : JSP_NESTING_OK;
+        return JSP_NESTING_OK;
     default:
         return JSP_NESTING_OK;
     }
