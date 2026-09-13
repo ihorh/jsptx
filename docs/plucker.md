@@ -43,14 +43,14 @@ One value per record, in constant memory, at a throughput that stands beside
 Four branches, each landing on its own. Every stage ends green, and ends with
 something runnable, so the work survives being picked up cold.
 
-1. **`docs-refocus`** — correct `design.md`. No code.
-2. **`pluck-identity`** — `jsptx .`, printing each record verbatim.
-3. **`pluck-path`** — `jsptx .user.id`.
+1. **`docs-refocus`** — correct `design.md`. No code. **Merged.**
+2. **`pluck-identity`** — `jsptx .`, printing each record verbatim. **Merged.**
+3. **`pluck-path`** — `jsptx .user.id`. **Next.**
 4. **`pluck-bench`** — a throughput number beside `jq`'s.
 
-Stage 1 stands alone and can land at any point. Stage 2 carries the real work,
-proving the streaming machinery with no path logic in it. That leaves stage 3
-as key matching on top. `git branch` reports what has landed.
+Stage 2 carried the real work, proving the streaming machinery with no path
+logic in it. That leaves stage 3 as key matching on top. `docs/pipeline.md`
+reshaped the code between stages 2 and 3, and closed.
 
 ## Scope
 
@@ -228,6 +228,19 @@ container.
 The array is streamed, never buffered: `[`, then each value as it is found,
 separated by `,`, then `]`. Memory stays constant.
 
+**The array is what one `jsptx` hands another.** That is why it is the default
+rather than `--lines`, settled 2026-09-13. Every intermediate call in a pipeline
+emits JSON, and only the last call opts out.
+
+    jsptx .user | jsptx .id | jsptx --lines .name
+
+**Framing is unconditional, so an empty run prints `[]` and exits 0.** Under
+`--lines` an empty run prints nothing.
+
+Exit status stays 0 whether or not anything matched, which is what `jq` does.
+Exiting 1 on no match belongs to search tools such as `grep`. An opt-in flag
+can carry that later, the way `jq -e` does.
+
 **The cost is truncation, and it is accepted rather than solved.** jsptx exists
 for multi-gigabyte streams. A run that dies at four gigabytes leaves an
 unterminated document, so everything already written fails to parse. A sequence
@@ -282,38 +295,15 @@ Each one is verified against the code rather than assumed.
 Each step names the goal it serves, since infra serves a functional,
 performance, or maintainability goal, or it waits.
 
-### Stage 1 — `docs-refocus` (maintainability)
+### Stages 1 and 2 — Landed
 
-`design.md:16-17` states the goal as throughput and memory. That framing is
-what licensed M3, so correct it: the usability thesis leads, and performance is
-the requirement beside it.
+Stage 1 corrected `design.md`: the usability thesis leads, performance is the
+requirement beside it, and the M0-M3 milestone plan is retired. Stage 2 shipped
+`jsptx .`, with `include/jsp_depth.h` cherry-picked from `m3-depth-framing`,
+fixtures under `tests/data/pluck/` run at `buf_size` 64 and 4096, and a
+positional path argument in `src/jsp_settings.c`.
 
-Retire the milestone plan. M0 through M2 have shipped, and `git log` plus the
-per-milestone notes describe them more accurately. Delete the M3 spec, so it
-misleads nobody again. Keep "Decisions That Bind" and "Deferred, with Reasons".
-Those hold reasoning and measurements no reader can recover from the code.
-
-### Stage 2 — `pluck-identity` (functional)
-
-Ships `jsptx .`, printing each record's bytes verbatim, one per line. It stands
-on its own as a streaming record splitter, and it exercises every hard part of
-the design with no path logic involved.
-
-1. `git cherry-pick 13b5c62` from `m3-depth-framing` brings
-   `include/jsp_depth.h` and `tests/depth_test.c`, and nothing besides. That
-   commit stands alone. The file earns its place here, since the plucker needs
-   record boundaries, container kind, and detection of malformed nesting.
-2. The byte walk steps the ranges between mask bits, bounded by `block.len`. A
-   new `jsp_pluck_state` threads through `process_block` the way
-   `jsp_string_state` does at `src/jsp_run.c:120`.
-3. Value-kind dispatch and write-through emission reuse `write_all`
-   (`jsp_write_all`). A value in flight terminates when the reader reports
-   `JSP_READER_END`.
-4. The CLI takes a positional path argument in `src/jsp_settings.c`, which
-   already hand-parses flags and uses `jstr` (`include/jstr.h`). `--masks`,
-   `--sink`, and `--buf-size` stay as the debugging and benchmarking surface.
-5. Fixtures land under `tests/data/pluck/`, following the `tests/data/strings/`
-   pattern `tests/strings_test.c` established, run at `buf_size` 64 and 4096.
+What they left for stage 3 is in `docs/pipeline.md`'s "As Closed".
 
 ### Stage 3 — `pluck-path` (functional)
 

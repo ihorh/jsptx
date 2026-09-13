@@ -1,8 +1,9 @@
 # jsptx — Design
 
 `jsptx` finds the structure in a JSON byte stream using SIMD, one 64-byte block
-at a time. It reads standard input, and it emits the byte offset of every
-character that carries structure.
+at a time. That pass now feeds a user-facing command: `jsptx .` splits a stream
+into records and prints each verbatim. The structural offsets it finds remain
+available as a trace, under `--offsets`.
 
 This document records what the design settled on and why. `docs/brainstorm.md`
 holds the earlier exploration that led here, including options this document
@@ -181,4 +182,3 @@ section closes an argument, ask whether it survives the next milestone.
 ## Open Questions
 
 - Whether the test step should build with a sanitizer, and which one.
-- Whether `.claude-notes/` exists in this repository, and whether git tracks it.
