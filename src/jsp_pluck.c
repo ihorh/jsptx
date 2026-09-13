@@ -6,12 +6,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-static bool is_json_ws(uint8_t c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+static bool is_json_ws_(uint8_t c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
 /* How many of s's leading octets are JSON whitespace. */
-static size_t ws_prefix(jsp_slice_u8 s) {
+static size_t ws_prefix_(jsp_slice_u8 s) {
     size_t n = 0;
-    while (n < s.len && is_json_ws(s.ptr[n])) {
+    while (n < s.len && is_json_ws_(s.ptr[n])) {
         n++;
     }
     return n;
@@ -19,21 +19,21 @@ static size_t ws_prefix(jsp_slice_u8 s) {
 
 /* How many of s's leading octets belong to a bare scalar: everything before
    the first whitespace, since a structural octet never reaches a BYTES token. */
-static size_t scalar_prefix(jsp_slice_u8 s) {
+static size_t scalar_prefix_(jsp_slice_u8 s) {
     size_t n = 0;
-    while (n < s.len && !is_json_ws(s.ptr[n])) {
+    while (n < s.len && !is_json_ws_(s.ptr[n])) {
         n++;
     }
     return n;
 }
 
 /* The stream's shape is decided by its very first non-whitespace byte,
-   wherever it turns up: a mask bit in push_structural, or a bare scalar's
-   lead byte in push_bytes. A '[' there means the whole stream is one
+   wherever it turns up: a mask bit in push_structural_, or a bare scalar's
+   lead byte in push_bytes_. A '[' there means the whole stream is one
    top-level array to unwrap, and its elements, one depth in, are the
    records; anything else means depth 0 holds them. Every later call is a
    no-op. */
-static void latch_shape(jsp_pluck_state *state, uint8_t c) {
+static void latch_shape_(jsp_pluck_state *state, uint8_t c) {
     if (state->shape != JSP_PLUCK_SHAPE_UNKNOWN) {
         return;
     }
@@ -43,7 +43,7 @@ static void latch_shape(jsp_pluck_state *state, uint8_t c) {
 /* Starts a record at the byte the caller just found, entering phase. Every
    record after the first gets the newline that separates it from the one
    before. */
-static int begin_record(jsp_pluck_state *state, jsp_pluck_phase phase, int out_fd) {
+static int begin_record_(jsp_pluck_state *state, jsp_pluck_phase phase, int out_fd) {
     state->phase = phase;
     if (!state->record_seen) {
         state->record_seen = true;
@@ -58,22 +58,22 @@ static int begin_record(jsp_pluck_state *state, jsp_pluck_phase phase, int out_f
    in one write. Otherwise the token holds bare scalars between whitespace,
    and each pass of the loop emits one of them. A scalar reaching the token's
    end may continue into the next one, so it stays open. */
-static int push_bytes(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
+static int push_bytes_(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
     if (state->phase == JSP_PLUCK_STRING || state->phase == JSP_PLUCK_CONTAINER) {
         return jsp_write_all(out_fd, bytes.ptr, bytes.len);
     }
 
     jsp_slice_u8 rest = bytes;
     if (state->phase != JSP_PLUCK_SCALAR) {
-        rest = jsp_slice_u8_after(rest, ws_prefix(rest));
+        rest = jsp_slice_u8_after(rest, ws_prefix_(rest));
     }
     while (!jsp_slice_u8_empty(rest)) {
-        latch_shape(state, rest.ptr[0]); /* never '[': that is always a mask bit */
+        latch_shape_(state, rest.ptr[0]); /* never '[': that is always a mask bit */
         if (state->phase == JSP_PLUCK_BETWEEN &&
-            begin_record(state, JSP_PLUCK_SCALAR, out_fd) != 0) {
+            begin_record_(state, JSP_PLUCK_SCALAR, out_fd) != 0) {
             return -1;
         }
-        size_t n = scalar_prefix(rest);
+        size_t n = scalar_prefix_(rest);
         if (jsp_write_all(out_fd, rest.ptr, n) != 0) {
             return -1;
         }
@@ -82,7 +82,7 @@ static int push_bytes(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
         }
         state->phase = JSP_PLUCK_BETWEEN;
         rest = jsp_slice_u8_after(rest, n);
-        rest = jsp_slice_u8_after(rest, ws_prefix(rest));
+        rest = jsp_slice_u8_after(rest, ws_prefix_(rest));
     }
     return 0;
 }
@@ -90,9 +90,9 @@ static int push_bytes(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
 /* Handles one mask bit: one of { } [ ] : , " in stream order, exactly the
    set jsp_depth_step expects. Every one of them passes through depth
    tracking once, whatever phase it arrives in. */
-static int push_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
+static int push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
     bool opening_wrapper = state->shape == JSP_PLUCK_SHAPE_UNKNOWN && c == '[';
-    latch_shape(state, c);
+    latch_shape_(state, c);
 
     jsp_depth_result r = jsp_depth_step(&state->depth, c);
     if (r == JSP_DEPTH_ERROR_OVERFLOW || r == JSP_DEPTH_ERROR_MISMATCH ||
@@ -105,7 +105,7 @@ static int push_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
 
     if (state->phase == JSP_PLUCK_SCALAR) {
         /* a bare scalar ends at the first whitespace or structural byte;
-           push_bytes only ever sees the whitespace case, so a scalar butting
+           push_bytes_ only ever sees the whitespace case, so a scalar butting
            straight up against this mask bit closes here instead */
         state->phase = JSP_PLUCK_BETWEEN;
     }
@@ -130,13 +130,13 @@ static int push_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
 
     /* JSP_PLUCK_BETWEEN, a scalar just closed above included. */
     if (c == '"') {
-        if (begin_record(state, JSP_PLUCK_STRING, out_fd) != 0) {
+        if (begin_record_(state, JSP_PLUCK_STRING, out_fd) != 0) {
             return -1;
         }
         return jsp_write_all(out_fd, &c, 1);
     }
     if (c == '{' || c == '[') {
-        if (begin_record(state, JSP_PLUCK_CONTAINER, out_fd) != 0) {
+        if (begin_record_(state, JSP_PLUCK_CONTAINER, out_fd) != 0) {
             return -1;
         }
         return jsp_write_all(out_fd, &c, 1);
@@ -149,7 +149,7 @@ static int push_structural(jsp_pluck_state *state, uint8_t c, int out_fd) {
 
 int jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd) {
     if (token.kind == JSP_TOKEN_BYTES) {
-        return push_bytes(state, token.bytes, out_fd);
+        return push_bytes_(state, token.bytes, out_fd);
     }
-    return push_structural(state, token.bytes.ptr[0], out_fd);
+    return push_structural_(state, token.bytes.ptr[0], out_fd);
 }
