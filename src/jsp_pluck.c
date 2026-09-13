@@ -28,15 +28,14 @@ static size_t scalar_prefix_(jsp_slice_u8 s) {
 }
 
 /* Starts a record at the byte the caller just found, entering phase. Every
-   record after the first gets the newline that separates it from the one
-   before. */
+   record after the first gets the separator between it and the one before. */
 static int begin_record_(jsp_pluck_state *state, jsp_pluck_phase phase, int out_fd) {
     state->phase = phase;
     if (!state->record_seen) {
         state->record_seen = true;
         return 0;
     }
-    return jsp_write_newline(out_fd);
+    return jsp_write_jstr(out_fd, state->separator);
 }
 
 /* Handles one BYTES token: octets with no structural one among them. A string or

@@ -234,7 +234,9 @@ emits JSON, and only the last call opts out.
     jsptx .user | jsptx .id | jsptx --lines .name
 
 **Framing is unconditional, so an empty run prints `[]` and exits 0.** Under
-`--lines` an empty run prints nothing.
+`--lines` an empty run prints a lone newline, the closing framing with nothing
+before it. Suppressing that needs a check at the end of the run, which is
+deferred until a caller trips over it.
 
 Exit status stays 0 whether or not anything matched, which is what `jq` does.
 Exiting 1 on no match belongs to search tools such as `grep`. An opt-in flag

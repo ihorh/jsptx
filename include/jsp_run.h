@@ -8,9 +8,8 @@
 
 /* jsp_run's real output, to out_fd. */
 typedef enum {
-    JSP_OUTPUT_SINK, /* classifies (and plucks, if traced) and discards; out_fd is never touched
-                      */
-    JSP_OUTPUT_PLUCK, /* one line per record: its own bytes verbatim, newline-terminated */
+    JSP_OUTPUT_SINK,  /* classifies and discards; nothing reaches out_fd */
+    JSP_OUTPUT_PLUCK, /* each record's own bytes verbatim, in one JSON array or one per line */
 } jsp_output_mode;
 
 /* Where jsp_run reads, writes, and, eventually, reports: err_fd is not yet
@@ -23,6 +22,14 @@ typedef struct {
     int trace_fd;
 } jsp_fds;
 
+/* The bytes jsp_run writes to out_fd around the records and between them,
+   whatever the records turn out to be. All empty writes nothing. */
+typedef struct {
+    jstr open;      /* before the stream is read */
+    jstr separator; /* before every record but the first */
+    jstr close;     /* after the stream ends */
+} jsp_framing;
+
 /* Everything jsp_run does once it's reading, cli-supplied or defaulted
    alike. path is meaningful only when output is JSP_OUTPUT_PLUCK; it views
    the matching argv entry, which outlives the process. trace is orthogonal
@@ -33,6 +40,7 @@ typedef struct {
     jsp_output_mode output;
     jsp_trace_mode  trace;
     jstr            path;
+    jsp_framing     framing;
 } jsp_settings;
 
 typedef enum {
@@ -54,10 +62,12 @@ typedef struct {
    nothing at all: every block is still classified, but the result is
    discarded rather than formatted and written, for measuring the
    pipeline's own cost apart from its I/O. JSP_OUTPUT_PLUCK writes each
-   record's own bytes verbatim, one per line: a record is a value in a
-   concatenated or newline-delimited stream, or an element of a single
-   top-level array, which is unwrapped rather than emitted itself. See
-   docs/plucker.md.
+   record's own bytes verbatim, separated by settings.framing.separator. A
+   record is a value in a concatenated or newline-delimited stream, or an
+   element of a top-level array, which is unwrapped rather than emitted
+   itself. See docs/plucker.md. Whatever the output, settings.framing.open
+   goes out before the stream is read and settings.framing.close after it
+   ends.
 
    settings.trace decides what reaches fds.trace_fd, the same way and at
    the same time, whatever output is doing with out_fd. JSP_TRACE_NONE

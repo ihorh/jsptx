@@ -13,11 +13,12 @@ static const char *usage_text =
     "Usage: jsptx [PATH] [OPTIONS]\n"
     "\n"
     "  Reads a JSON stream on stdin. With PATH, prints each record's matching\n"
-    "  value verbatim, one per line; \".\" matches the whole record and is the\n"
-    "  only path implemented so far. Without PATH, classifies the stream and\n"
-    "  discards the result.\n"
+    "  value verbatim, all inside one JSON array; \".\" matches the whole record\n"
+    "  and is the only path implemented so far. Without PATH, classifies the\n"
+    "  stream and discards the result.\n"
     "\n"
     "Options:\n"
+    "  --lines        print one value per line instead of one JSON array\n"
     "  --buf-size=N   read in chunks of N bytes (default %zu)\n"
     "  --offsets      trace every structural character's offset to stderr\n"
     "  --masks        trace each block's classification to stderr, as hex\n"
@@ -70,6 +71,7 @@ static const jstr FLG_HELP = JSTR("--help");
 static const jstr FLG_HELP_S = JSTR("-h");
 static const jstr FLG_OFFSET = JSTR("--offsets");
 static const jstr FLG_MASKS = JSTR("--masks");
+static const jstr FLG_LINES = JSTR("--lines");
 static const jstr OPT_BUF_SIZE = JSTR("--buf-size=");
 
 static const jsp_settings JSP_SETTINGS_DEFAULT = {
@@ -78,9 +80,23 @@ static const jsp_settings JSP_SETTINGS_DEFAULT = {
     .trace = JSP_TRACE_NONE,
 };
 
+/* Plucked records inside one JSON array, the default. */
+static const jsp_framing FRAMING_ARRAY = {
+    .open = JSTR("["),
+    .separator = JSTR(","),
+    .close = JSTR("]\n"),
+};
+
+/* Plucked records one per line, under --lines. */
+static const jsp_framing FRAMING_LINES = {
+    .separator = JSTR("\n"),
+    .close = JSTR("\n"),
+};
+
 jsp_settings jsp_settings_parse(int argc, char **argv) {
     jsp_settings settings = JSP_SETTINGS_DEFAULT;
     bool         have_path = false;
+    bool         lines = false;
 
     for (int i = 1; i < argc; i++) {
         jstr arg = jstr_init(argv[i]);
@@ -93,6 +109,8 @@ jsp_settings jsp_settings_parse(int argc, char **argv) {
             settings.trace = JSP_TRACE_OFFSETS;
         } else if (jstr_equal(arg, FLG_MASKS)) {
             settings.trace = JSP_TRACE_MASKS;
+        } else if (jstr_equal(arg, FLG_LINES)) {
+            lines = true;
         } else if (jstr_starts_with(arg, JSTR("--"))) {
             fprintf(stderr, "jsptx: unrecognized argument: %s\n", argv[i]);
             exit(1);
@@ -106,5 +124,8 @@ jsp_settings jsp_settings_parse(int argc, char **argv) {
         }
     }
 
+    if (have_path) {
+        settings.framing = lines ? FRAMING_LINES : FRAMING_ARRAY;
+    }
     return settings;
 }

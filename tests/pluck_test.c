@@ -2,7 +2,8 @@
 
 /* Feeds the fixtures under tests/data/pluck/ through jsp_run in
    JSP_OUTPUT_PLUCK mode and checks the record stream against each
-   fixture's .expected file.
+   fixture's .expected file, and again with --lines against its
+   .lines.expected file.
 
    Runs each fixture at buf_size 64 (the tightest possible refill) and at
    4096, carrying forward the same cross-buffer-size criterion
@@ -25,6 +26,18 @@
 static const char *const FIXTURES[] = {
     "ndjson_objects", "array_unwrap", "bare_scalars",   "array_of_scalars",
     "strings",        "nested",       "block_boundary", "multi_array_unwrap",
+};
+
+/* The framings jsp_settings_parse picks for a path, one JSON array by
+   default and one record per line under --lines. */
+static const jsp_framing FRAMING_ARRAY = {
+    .open = JSTR("["),
+    .separator = JSTR(","),
+    .close = JSTR("]\n"),
+};
+static const jsp_framing FRAMING_LINES = {
+    .separator = JSTR("\n"),
+    .close = JSTR("\n"),
 };
 
 /* Bytes of context printed on each side of the first difference. */
@@ -190,9 +203,11 @@ typedef struct {
     size_t     out_len;
 } pluck_run;
 
-/* Feeds input through a pipe into jsp_run in JSP_OUTPUT_PLUCK mode and
-   reads back the record stream. The caller frees .out. */
-static pluck_run run_pluck(const uint8_t *input, size_t input_len, size_t buf_size) {
+/* Feeds input through a pipe into jsp_run in JSP_OUTPUT_PLUCK mode, one
+   JSON array or with lines one record per line, and reads back what it
+   wrote. The caller frees .out. */
+static pluck_run
+run_pluck(const uint8_t *input, size_t input_len, size_t buf_size, bool lines) {
     int in_pipe[2];
     int piped = pipe(in_pipe);
     assert(piped == 0);
@@ -208,9 +223,11 @@ static pluck_run run_pluck(const uint8_t *input, size_t input_len, size_t buf_si
 
     int          out_fd = open_sink();
     jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1, .err_fd = -1};
-    jsp_settings settings = {
-        .buf_size = buf_size, .output = JSP_OUTPUT_PLUCK, .trace = JSP_TRACE_NONE};
-    pluck_run run = {.result = jsp_run(fds, settings)};
+    jsp_settings settings = {.buf_size = buf_size,
+                             .output = JSP_OUTPUT_PLUCK,
+                             .trace = JSP_TRACE_NONE,
+                             .framing = lines ? FRAMING_LINES : FRAMING_ARRAY};
+    pluck_run    run = {.result = jsp_run(fds, settings)};
     close(in_pipe[0]);
 
     int   status;
@@ -230,26 +247,47 @@ static pluck_run run_pluck(const uint8_t *input, size_t input_len, size_t buf_si
     return run;
 }
 
-/* Runs one fixture at one buf_size and checks jsp_run's record stream
-   against the fixture's .expected file. */
-static void run_fixture(const char *name, size_t buf_size) {
-    char json_path[256];
-    char expected_path[256];
-    char case_name[256];
+/* Runs one fixture at one buf_size in one output mode and checks what
+   jsp_run wrote against the fixture's .expected file, or .lines.expected
+   under lines. */
+static void run_fixture(const char *name, size_t buf_size, bool lines) {
+    const char *suffix = lines ? ".lines" : "";
+    char        json_path[256];
+    char        expected_path[256];
+    char        case_name[256];
     snprintf(json_path, sizeof(json_path), "tests/data/pluck/%s.json", name);
-    snprintf(expected_path, sizeof(expected_path), "tests/data/pluck/%s.expected", name);
-    snprintf(case_name, sizeof(case_name), "pluck/%s buf_size=%zu", name, buf_size);
+    snprintf(expected_path, sizeof(expected_path), "tests/data/pluck/%s%s.expected", name,
+             suffix);
+    snprintf(case_name, sizeof(case_name), "pluck/%s%s buf_size=%zu", name, suffix, buf_size);
 
     size_t   input_len;
     uint8_t *input = read_file(json_path, &input_len);
     size_t   want_len;
     uint8_t *want = read_file(expected_path, &want_len);
 
-    pluck_run run = run_pluck(input, input_len, buf_size);
+    pluck_run run = run_pluck(input, input_len, buf_size, lines);
     check_case(case_name, run.result, run.out, run.out_len, want, want_len);
 
     free(input);
     free(want);
+    free(run.out);
+}
+
+/* Runs input in both output modes at buf_size 64 and checks each against its
+   own expected output. */
+static void check_both_modes(const char *name, jstr input, jstr want_array, jstr want_lines) {
+    char case_name[256];
+
+    pluck_run run = run_pluck((const uint8_t *)input.data, (size_t)input.len, 64, false);
+    snprintf(case_name, sizeof(case_name), "%s buf_size=64", name);
+    check_case(case_name, run.result, run.out, run.out_len, (const uint8_t *)want_array.data,
+               (size_t)want_array.len);
+    free(run.out);
+
+    run = run_pluck((const uint8_t *)input.data, (size_t)input.len, 64, true);
+    snprintf(case_name, sizeof(case_name), "%s.lines buf_size=64", name);
+    check_case(case_name, run.result, run.out, run.out_len, (const uint8_t *)want_lines.data,
+               (size_t)want_lines.len);
     free(run.out);
 }
 
@@ -260,19 +298,24 @@ static void test_scalar_on_block_boundary(void) {
     uint8_t input[64];
     memset(input, ' ', sizeof(input) - 1);
     input[sizeof(input) - 1] = '7';
+    check_both_modes("scalar_on_block_boundary", (jstr){(const char *)input, sizeof(input)},
+                     JSTR("[7]\n"), JSTR("7\n"));
+}
 
-    static const uint8_t want[] = "7\n";
-    pluck_run            run = run_pluck(input, sizeof(input), 64);
-    check_case("scalar_on_block_boundary buf_size=64", run.result, run.out, run.out_len, want,
-               sizeof(want) - 1);
-    free(run.out);
+/* No records at all, from empty input or whitespace alone: the array's
+   framing is unconditional in both modes, so under lines the close
+   newline stands alone. */
+static void test_no_records(void) {
+    check_both_modes("empty_input", JSTR(""), JSTR("[]\n"), JSTR("\n"));
+    check_both_modes("whitespace_only", JSTR(" \n\t "), JSTR("[]\n"), JSTR("\n"));
+    check_both_modes("empty_top_level_array", JSTR("[]"), JSTR("[]\n"), JSTR("\n"));
 }
 
 /* Depth errors (an unbalanced or mismatched closing bracket) fail the run
    rather than emitting a partial record. */
 static void test_malformed_input_fails(void) {
     static const uint8_t input[] = "}";
-    pluck_run            run = run_pluck(input, sizeof(input) - 1, 64);
+    pluck_run            run = run_pluck(input, sizeof(input) - 1, 64, false);
 
     /* JSP_ERR_BLOCK_PROCESS_TMP is the status today, but its name says it is
        a placeholder; what this test pins is that the run fails at all. */
@@ -293,11 +336,13 @@ int main(void) {
 
     for (size_t i = 0; i < sizeof(FIXTURES) / sizeof(FIXTURES[0]); i++) {
         for (size_t j = 0; j < sizeof(buf_sizes) / sizeof(buf_sizes[0]); j++) {
-            run_fixture(FIXTURES[i], buf_sizes[j]);
+            run_fixture(FIXTURES[i], buf_sizes[j], false);
+            run_fixture(FIXTURES[i], buf_sizes[j], true);
         }
     }
 
     test_scalar_on_block_boundary();
+    test_no_records();
     test_malformed_input_fails();
 
     if (failures > 0) {
