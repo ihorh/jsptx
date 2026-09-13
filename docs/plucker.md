@@ -185,16 +185,15 @@ which is what makes the last row safe.
 counter of contiguously matched leading segments. The walk attempts a key match
 only at a depth equal to that counter, and decrements on popping above it.
 
-**The unwrap decision is derived, never latched.** `jsp_nesting_state` pushes one
-bit per open container, `1` for an object and `0` for an array, so the outermost
-container is bit `depth - 1`. Records therefore sit one level in exactly when
-that bit is clear:
+**The unwrap decision is derived, never latched.** `jsp_nesting_state` keeps one
+bit per open container, `1` for an object and `0` for an array. Records sit one
+level in exactly when the outermost open container is an array:
 
 ```c
-record_depth = (depth > 0 && ((stack >> (depth - 1)) & 1) == 0) ? 1 : 0;
+record_depth = jsp_nesting_outermost_is_array(&nesting) ? 1 : 0;
 ```
 
-That retires `shape_known`, `unwrap`, and `record_depth` from
+That retires the `jsp_pluck_shape` enum and its `shape` field from
 `jsp_pluck_state`. Stage 2 latched the shape on the stream's first
 non-whitespace byte, which made the first top-level array unwrap and every
 later one emit as a record.

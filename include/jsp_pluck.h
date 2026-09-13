@@ -7,31 +7,23 @@
 #include <stdint.h>
 
 /* Where the walk sits relative to the record it is currently between or
-   inside. BETWEEN covers whitespace, the separators of an unwrapped array,
-   and that array's own brackets. A record is found the moment BETWEEN sees
-   its first byte, and the record's own kind decides which phase follows. */
+   inside. A record is a top-level value, except that every top-level array
+   unwraps and its elements are the records instead. BETWEEN covers
+   whitespace, the separators of an unwrapped array, and that array's own
+   brackets. A record is found the moment BETWEEN sees its first byte, and
+   the record's own kind decides which phase follows. */
 typedef enum {
     JSP_PLUCK_BETWEEN,
-    JSP_PLUCK_STRING,    /* a top-level string record, open quote already emitted */
-    JSP_PLUCK_CONTAINER, /* a top-level object or array record, tracked via depth */
-    JSP_PLUCK_SCALAR,    /* a top-level bare number, true, false, or null */
+    JSP_PLUCK_STRING,    /* a string record, open quote already emitted */
+    JSP_PLUCK_CONTAINER, /* an object or array record, tracked via depth */
+    JSP_PLUCK_SCALAR,    /* a bare number, true, false, or null record */
 } jsp_pluck_phase;
 
-/* Where the records sit, latched from the stream's first non-whitespace
-   byte. */
-typedef enum {
-    JSP_PLUCK_SHAPE_UNKNOWN, /* no non-whitespace byte seen yet */
-    JSP_PLUCK_SHAPE_ARRAY,   /* one top-level array; its elements are the records */
-    JSP_PLUCK_SHAPE_VALUES,  /* the top-level values are the records */
-} jsp_pluck_shape;
-
 /* Carried across every block of a stream, one call per block, in order.
-   Zero-initialize for the first block: phase starts BETWEEN, the shape
-   UNKNOWN, and depth empty, matching jsp_nesting_state's own
-   zero-initialization contract. */
+   Zero-initialize for the first block: phase starts BETWEEN and nesting empty,
+   matching jsp_nesting_state's own zero-initialization contract. */
 typedef struct {
     jsp_pluck_phase phase;
-    jsp_pluck_shape shape;
     _Bool record_seen; /* whether a record has started; every later one gets a newline first */
     jsp_nesting_state nesting;
 } jsp_pluck_state;

@@ -14,7 +14,7 @@ static void run_sequence(const char *chars, const unsigned *depths, size_t n) {
     jsp_nesting_state state = {0};
     for (size_t i = 0; i < n; i++) {
         assert(jsp_nesting_step(&state, (uint8_t)chars[i]) == JSP_NESTING_OK);
-        assert(state.depth == depths[i]);
+        assert(jsp_nesting_depth(&state) == depths[i]);
     }
 }
 
@@ -35,8 +35,11 @@ static void test_nested_mixed(void) {
 }
 
 static void test_non_bracket_chars_never_change_depth(void) {
-    jsp_nesting_state before = {.stack = 0x5, .depth = 3};
-    jsp_nesting_state state = before;
+    jsp_nesting_state state = {0};
+    assert(jsp_nesting_step(&state, '{') == JSP_NESTING_OK);
+    assert(jsp_nesting_step(&state, '[') == JSP_NESTING_OK);
+    assert(jsp_nesting_step(&state, '{') == JSP_NESTING_OK);
+    jsp_nesting_state before = state;
     static const char chars[] = ":,\"";
     for (size_t i = 0; i < sizeof(chars) - 1; i++) {
         jsp_nesting_result got = jsp_nesting_step(&state, (uint8_t)chars[i]);
@@ -72,7 +75,7 @@ static void test_overflow_at_exactly_max_depth(void) {
     for (unsigned i = 0; i < JSP_MAX_DEPTH; i++) {
         assert(jsp_nesting_step(&state, '[') == JSP_NESTING_OK);
     }
-    assert(state.depth == JSP_MAX_DEPTH);
+    assert(jsp_nesting_depth(&state) == JSP_MAX_DEPTH);
 
     jsp_nesting_state before_error = state;
     assert(jsp_nesting_step(&state, '[') == JSP_NESTING_ERROR_OVERFLOW);
@@ -80,7 +83,21 @@ static void test_overflow_at_exactly_max_depth(void) {
 
     /* Popping back down one level makes room again. */
     assert(jsp_nesting_step(&state, ']') == JSP_NESTING_OK);
-    assert(state.depth == JSP_MAX_DEPTH - 1);
+    assert(jsp_nesting_depth(&state) == JSP_MAX_DEPTH - 1);
+}
+
+static void test_outermost_is_array(void) {
+    jsp_nesting_state state = {0};
+    assert(!jsp_nesting_outermost_is_array(&state));
+    assert(jsp_nesting_step(&state, '[') == JSP_NESTING_OK);
+    assert(jsp_nesting_step(&state, '{') == JSP_NESTING_OK);
+    assert(jsp_nesting_outermost_is_array(&state));
+    assert(jsp_nesting_step(&state, '}') == JSP_NESTING_OK);
+    assert(jsp_nesting_step(&state, ']') == JSP_NESTING_OK);
+
+    /* the stale '[' bit left behind must not leak into the next value */
+    assert(jsp_nesting_step(&state, '{') == JSP_NESTING_OK);
+    assert(!jsp_nesting_outermost_is_array(&state));
 }
 
 static void test_concatenated_values_each_return_to_depth_zero(void) {
@@ -98,6 +115,7 @@ int main(void) {
     test_mismatch();
     test_unbalanced();
     test_overflow_at_exactly_max_depth();
+    test_outermost_is_array();
     test_concatenated_values_each_return_to_depth_zero();
 
     printf("ok\n");

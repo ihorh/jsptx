@@ -27,19 +27,6 @@ static size_t scalar_prefix_(jsp_slice_u8 s) {
     return n;
 }
 
-/* The stream's shape is decided by its very first non-whitespace byte,
-   wherever it turns up: a mask bit in push_structural_, or a bare scalar's
-   lead byte in push_bytes_. A '[' there means the whole stream is one
-   top-level array to unwrap, and its elements, one depth in, are the
-   records; anything else means depth 0 holds them. Every later call is a
-   no-op. */
-static void latch_shape_(jsp_pluck_state *state, uint8_t c) {
-    if (state->shape != JSP_PLUCK_SHAPE_UNKNOWN) {
-        return;
-    }
-    state->shape = c == '[' ? JSP_PLUCK_SHAPE_ARRAY : JSP_PLUCK_SHAPE_VALUES;
-}
-
 /* Starts a record at the byte the caller just found, entering phase. Every
    record after the first gets the newline that separates it from the one
    before. */
@@ -68,7 +55,6 @@ static int push_bytes_(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
         rest = jsp_slice_u8_after(rest, ws_prefix_(rest));
     }
     while (!jsp_slice_u8_empty(rest)) {
-        latch_shape_(state, rest.ptr[0]); /* never '[': that is always a mask bit */
         if (state->phase == JSP_PLUCK_BETWEEN &&
             begin_record_(state, JSP_PLUCK_SCALAR, out_fd) != 0) {
             return -1;
@@ -88,18 +74,14 @@ static int push_bytes_(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
 }
 
 /* Handles one mask bit: one of { } [ ] : , " in stream order, exactly the
-   set jsp_nesting_step expects. Every one of them passes through depth
-   tracking once, whatever phase it arrives in. */
+   set jsp_nesting_step expects. Every one of them passes through
+   jsp_nesting_step once, whatever phase it arrives in. */
 static int push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
-    bool opening_wrapper = state->shape == JSP_PLUCK_SHAPE_UNKNOWN && c == '[';
-    latch_shape_(state, c);
+    bool opening_wrapper = c == '[' && jsp_nesting_depth(&state->nesting) == 0;
 
     jsp_nesting_result r = jsp_nesting_step(&state->nesting, c);
     if (r != JSP_NESTING_OK) {
         return -1;
-    }
-    if (opening_wrapper) {
-        return 0; /* the stream's own outer '[': not a record, stays BETWEEN */
     }
 
     if (state->phase == JSP_PLUCK_SCALAR) {
@@ -107,6 +89,9 @@ static int push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
            push_bytes_ only ever sees the whitespace case, so a scalar butting
            straight up against this mask bit closes here instead */
         state->phase = JSP_PLUCK_BETWEEN;
+    }
+    if (opening_wrapper) {
+        return 0; /* a top-level array's own '[': not a record, stays BETWEEN */
     }
 
     if (state->phase == JSP_PLUCK_STRING) {
@@ -120,8 +105,9 @@ static int push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
         if (jsp_write_all(out_fd, &c, 1) != 0) {
             return -1;
         }
-        unsigned record_depth = state->shape == JSP_PLUCK_SHAPE_ARRAY ? 1u : 0u;
-        if ((c == '}' || c == ']') && state->nesting.depth == record_depth) {
+        /* every top-level array unwraps, so its elements are the records */
+        unsigned record_depth = jsp_nesting_outermost_is_array(&state->nesting) ? 1u : 0u;
+        if ((c == '}' || c == ']') && jsp_nesting_depth(&state->nesting) == record_depth) {
             state->phase = JSP_PLUCK_BETWEEN;
         }
         return 0;
@@ -141,7 +127,7 @@ static int push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
         return jsp_write_all(out_fd, &c, 1);
     }
     /* ':', ',', or an already depth-checked '}'/']': the separator or
-       closer between records, or the unwrapped array's own bracket. None
+       closer between records, or an unwrapped array's own bracket. None
        of them belong to a record's own bytes. */
     return 0;
 }

@@ -24,7 +24,7 @@
 
 static const char *const FIXTURES[] = {
     "ndjson_objects", "array_unwrap", "bare_scalars",   "array_of_scalars",
-    "strings",        "nested",       "block_boundary",
+    "strings",        "nested",       "block_boundary", "multi_array_unwrap",
 };
 
 /* Bytes of context printed on each side of the first difference. */
