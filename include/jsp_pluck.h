@@ -1,7 +1,7 @@
 #ifndef JSP_PLUCK_H
 #define JSP_PLUCK_H
 
-#include "jsp_depth.h"
+#include "jsp_nesting.h"
 #include "jsp_scan.h"
 
 #include <stdint.h>
@@ -27,13 +27,13 @@ typedef enum {
 
 /* Carried across every block of a stream, one call per block, in order.
    Zero-initialize for the first block: phase starts BETWEEN, the shape
-   UNKNOWN, and depth empty, matching jsp_depth_state's own
+   UNKNOWN, and depth empty, matching jsp_nesting_state's own
    zero-initialization contract. */
 typedef struct {
     jsp_pluck_phase phase;
     jsp_pluck_shape shape;
     _Bool record_seen; /* whether a record has started; every later one gets a newline first */
-    jsp_depth_state depth;
+    jsp_nesting_state nesting;
 } jsp_pluck_state;
 
 /* Takes one token, writing each record's own bytes verbatim straight to

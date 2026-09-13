@@ -1,5 +1,5 @@
-#ifndef JSP_DEPTH_H
-#define JSP_DEPTH_H
+#ifndef JSP_NESTING_H
+#define JSP_NESTING_H
 
 #include <stdint.h>
 
@@ -15,12 +15,12 @@
    ERROR results are the ways a stream can violate bracket matching; the
    caller's own offset for the character that triggered one locates it. */
 typedef enum {
-    JSP_DEPTH_OK,
-    JSP_DEPTH_BOUNDARY,
-    JSP_DEPTH_ERROR_OVERFLOW,   /* an open bracket past JSP_MAX_DEPTH */
-    JSP_DEPTH_ERROR_MISMATCH,   /* a close bracket does not match its container */
-    JSP_DEPTH_ERROR_UNBALANCED, /* a close bracket with no open container */
-} jsp_depth_result;
+    JSP_NESTING_OK,
+    JSP_NESTING_BOUNDARY,
+    JSP_NESTING_ERROR_OVERFLOW,   /* an open bracket past JSP_MAX_DEPTH */
+    JSP_NESTING_ERROR_MISMATCH,   /* a close bracket does not match its container */
+    JSP_NESTING_ERROR_UNBALANCED, /* a close bracket with no open container */
+} jsp_nesting_result;
 
 /* Nesting state carried across every structural character in stream order:
    one bit per open container, 1 for an object and 0 for an array, and how
@@ -29,36 +29,36 @@ typedef enum {
 typedef struct {
     uint64_t stack;
     unsigned depth;
-} jsp_depth_state;
+} jsp_nesting_state;
 
 /* Advances state by one structural character, one of { } [ ] : , " as
    jsp_scan leaves them, with the ones inside strings already cleared. ':', ',', and '"' never
    change depth. On an ERROR result, state is left exactly as it was before c: the caller stops
    there rather than continuing to interpret an already-invalid stream. */
-static inline jsp_depth_result jsp_depth_step(jsp_depth_state *state, uint8_t c) {
+static inline jsp_nesting_result jsp_nesting_step(jsp_nesting_state *state, uint8_t c) {
     switch (c) {
     case '{':
     case '[':
         if (state->depth >= JSP_MAX_DEPTH) {
-            return JSP_DEPTH_ERROR_OVERFLOW;
+            return JSP_NESTING_ERROR_OVERFLOW;
         }
         state->stack = (state->stack << 1) | (uint64_t)(c == '{');
         state->depth++;
-        return JSP_DEPTH_OK;
+        return JSP_NESTING_OK;
     case '}':
     case ']':
         if (state->depth == 0) {
-            return JSP_DEPTH_ERROR_UNBALANCED;
+            return JSP_NESTING_ERROR_UNBALANCED;
         }
         if ((unsigned)(state->stack & 1) != (unsigned)(c == '}')) {
-            return JSP_DEPTH_ERROR_MISMATCH;
+            return JSP_NESTING_ERROR_MISMATCH;
         }
         state->stack >>= 1;
         state->depth--;
-        return state->depth == 0 ? JSP_DEPTH_BOUNDARY : JSP_DEPTH_OK;
+        return state->depth == 0 ? JSP_NESTING_BOUNDARY : JSP_NESTING_OK;
     default:
-        return JSP_DEPTH_OK;
+        return JSP_NESTING_OK;
     }
 }
 
-#endif /* JSP_DEPTH_H */
+#endif /* JSP_NESTING_H */

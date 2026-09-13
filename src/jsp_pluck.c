@@ -88,15 +88,15 @@ static int push_bytes_(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
 }
 
 /* Handles one mask bit: one of { } [ ] : , " in stream order, exactly the
-   set jsp_depth_step expects. Every one of them passes through depth
+   set jsp_nesting_step expects. Every one of them passes through depth
    tracking once, whatever phase it arrives in. */
 static int push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
     bool opening_wrapper = state->shape == JSP_PLUCK_SHAPE_UNKNOWN && c == '[';
     latch_shape_(state, c);
 
-    jsp_depth_result r = jsp_depth_step(&state->depth, c);
-    if (r == JSP_DEPTH_ERROR_OVERFLOW || r == JSP_DEPTH_ERROR_MISMATCH ||
-        r == JSP_DEPTH_ERROR_UNBALANCED) {
+    jsp_nesting_result r = jsp_nesting_step(&state->nesting, c);
+    if (r == JSP_NESTING_ERROR_OVERFLOW || r == JSP_NESTING_ERROR_MISMATCH ||
+        r == JSP_NESTING_ERROR_UNBALANCED) {
         return -1;
     }
     if (opening_wrapper) {
@@ -122,7 +122,7 @@ static int push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
             return -1;
         }
         unsigned record_depth = state->shape == JSP_PLUCK_SHAPE_ARRAY ? 1u : 0u;
-        if ((c == '}' || c == ']') && state->depth.depth == record_depth) {
+        if ((c == '}' || c == ']') && state->nesting.depth == record_depth) {
             state->phase = JSP_PLUCK_BETWEEN;
         }
         return 0;

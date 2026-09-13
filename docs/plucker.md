@@ -181,11 +181,11 @@ carrying a trailing space.
 A JSON number or literal can contain neither whitespace nor a structural byte,
 which is what makes the last row safe.
 
-**Position** comes from `jsp_depth_state` for container kind and depth, plus a
+**Position** comes from `jsp_nesting_state` for container kind and depth, plus a
 counter of contiguously matched leading segments. The walk attempts a key match
 only at a depth equal to that counter, and decrements on popping above it.
 
-**The unwrap decision is derived, never latched.** `jsp_depth_state` pushes one
+**The unwrap decision is derived, never latched.** `jsp_nesting_state` pushes one
 bit per open container, `1` for an object and `0` for an array, so the outermost
 container is bit `depth - 1`. Records therefore sit one level in exactly when
 that bit is clear:
