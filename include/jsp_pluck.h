@@ -2,47 +2,48 @@
 #define JSP_PLUCK_H
 
 #include "jsp_nesting.h"
+#include "jsp_path.h"
 #include "jsp_scan.h"
+#include "jstr.h"
 
 #include <stdint.h>
 
-/* Where the walk sits relative to the record it is currently between or
-   inside. BETWEEN covers whitespace, the separators of an unwrapped array,
-   and that array's own brackets. A record is found the moment BETWEEN sees
-   its first byte, and the record's own kind decides which phase follows. */
+/* Where the walk sits relative to the value it is currently between or
+   inside. A record is a top-level value, except that every top-level array
+   unwraps and its elements are the records instead. The path picks a value
+   out of each record, and "." picks the record itself. BETWEEN covers
+   everything the path passes over. A value is found the moment BETWEEN sees
+   its first byte at the path's end, and the value's own kind decides which
+   phase follows. */
 typedef enum {
     JSP_PLUCK_BETWEEN,
-    JSP_PLUCK_STRING,    /* a top-level string record, open quote already emitted */
-    JSP_PLUCK_CONTAINER, /* a top-level object or array record, tracked via depth */
-    JSP_PLUCK_SCALAR,    /* a top-level bare number, true, false, or null */
+    JSP_PLUCK_STRING,      /* a string value, open quote already emitted */
+    JSP_PLUCK_CONTAINER,   /* an object or array value, tracked via depth */
+    JSP_PLUCK_SCALAR,      /* a bare number, true, false, or null value */
+    JSP_PLUCK_KEY,         /* a key where the path's next segment could match */
+    JSP_PLUCK_SKIP_STRING, /* any other string, or a key that stopped matching */
 } jsp_pluck_phase;
 
-/* Where the records sit, latched from the stream's first non-whitespace
-   byte. */
-typedef enum {
-    JSP_PLUCK_SHAPE_UNKNOWN, /* no non-whitespace byte seen yet */
-    JSP_PLUCK_SHAPE_ARRAY,   /* one top-level array; its elements are the records */
-    JSP_PLUCK_SHAPE_VALUES,  /* the top-level values are the records */
-} jsp_pluck_shape;
-
-/* Carried across every block of a stream, one call per block, in order.
-   Zero-initialize for the first block: phase starts BETWEEN, the shape
-   UNKNOWN, and depth empty, matching jsp_nesting_state's own
-   zero-initialization contract. */
+/* Carried across every token of a stream, in order. Zero-initialize for the
+   first token, which starts phase BETWEEN and nesting empty, then set
+   separator and path. */
 typedef struct {
-    jsp_pluck_phase phase;
-    jsp_pluck_shape shape;
-    _Bool record_seen; /* whether a record has started; every later one gets a newline first */
+    jsp_pluck_phase   phase;
+    jstr              separator; /* written before every value but the first */
+    jsp_path          path;
+    _Bool             emitted_any; /* at least one value was emitted */
     jsp_nesting_state nesting;
+    unsigned          segments_matched;  /* keys that led here; drops as their objects close */
+    jstr              segment_text_left; /* path bytes the open key has yet to match */
+    uint8_t           last_structural;   /* the last of { } [ ] : , " seen */
 } jsp_pluck_state;
 
-/* Takes one token, writing each record's own bytes verbatim straight to
-   out_fd, with a newline before every record but the first; jsp_run writes
-   the last one. No key path is applied: jsptx . prints every record
-   whole. Call once per token from jsp_scan_next, in order, for every
-   BYTES and STRUCTURAL the stream yields. Returns 0, or -1 on a write error or
-   on malformed input: unbalanced or mismatched brackets, or nesting past
-   JSP_MAX_DEPTH. */
+/* Takes one token, writing each value the path picks, its own bytes verbatim,
+   straight to out_fd, with separator before every value but the first. A
+   segment matches a key byte for byte, escapes included. Call once per token
+   from jsp_scan_next, in order, for every BYTES and STRUCTURAL the stream
+   yields. Returns 0, or -1 on a write error or on malformed input: unbalanced
+   or mismatched brackets, or nesting past JSP_MAX_DEPTH. */
 int jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd);
 
 #endif /* JSP_PLUCK_H */

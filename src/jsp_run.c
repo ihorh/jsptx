@@ -39,7 +39,13 @@ jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
                   jsp_trace_make(fds.trace_fd, settings.trace));
 
     jsp_status      result = JSP_OK;
-    jsp_pluck_state pluck_state = {0};
+    jsp_pluck_state pluck_state = {.separator = settings.framing.separator,
+                                   .path = settings.path};
+
+    if (jsp_write_jstr(fds.out_fd, settings.framing.open) != 0) {
+        free(buf);
+        return jsp_result_make_(JSP_ERR_IO);
+    }
 
     for (;;) {
         jsp_scan_result next = jsp_scan_next(&scan);
@@ -57,7 +63,7 @@ jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
         }
     }
 
-    jsp_write_newline(fds.out_fd);
+    jsp_write_jstr(fds.out_fd, settings.framing.close);
 
     free(buf);
     return jsp_result_make_(result);

@@ -45,8 +45,8 @@ something runnable, so the work survives being picked up cold.
 
 1. **`docs-refocus`** — correct `design.md`. No code. **Merged.**
 2. **`pluck-identity`** — `jsptx .`, printing each record verbatim. **Merged.**
-3. **`pluck-path`** — `jsptx .user.id`. **Next.**
-4. **`pluck-bench`** — a throughput number beside `jq`'s.
+3. **`pluck-path`** — `jsptx .user.id`. **Merged.**
+4. **`pluck-bench`** — a throughput number beside `jq`'s. **Next.**
 
 Stage 2 carried the real work, proving the streaming machinery with no path
 logic in it. That leaves stage 3 as key matching on top. `docs/pipeline.md`
@@ -185,16 +185,15 @@ which is what makes the last row safe.
 counter of contiguously matched leading segments. The walk attempts a key match
 only at a depth equal to that counter, and decrements on popping above it.
 
-**The unwrap decision is derived, never latched.** `jsp_nesting_state` pushes one
-bit per open container, `1` for an object and `0` for an array, so the outermost
-container is bit `depth - 1`. Records therefore sit one level in exactly when
-that bit is clear:
+**The unwrap decision is derived, never latched.** `jsp_nesting_state` keeps one
+bit per open container, `1` for an object and `0` for an array. Records sit one
+level in exactly when the outermost open container is an array:
 
 ```c
-record_depth = (depth > 0 && ((stack >> (depth - 1)) & 1) == 0) ? 1 : 0;
+record_depth = jsp_nesting_outermost_is_array(&nesting) ? 1 : 0;
 ```
 
-That retires `shape_known`, `unwrap`, and `record_depth` from
+That retires the `jsp_pluck_shape` enum and its `shape` field from
 `jsp_pluck_state`. Stage 2 latched the shape on the stream's first
 non-whitespace byte, which made the first top-level array unwrap and every
 later one emit as a record.
@@ -235,7 +234,9 @@ emits JSON, and only the last call opts out.
     jsptx .user | jsptx .id | jsptx --lines .name
 
 **Framing is unconditional, so an empty run prints `[]` and exits 0.** Under
-`--lines` an empty run prints nothing.
+`--lines` an empty run prints a lone newline, the closing framing with nothing
+before it. Suppressing that needs a check at the end of the run, which is
+deferred until a caller trips over it.
 
 Exit status stays 0 whether or not anything matched, which is what `jq` does.
 Exiting 1 on no match belongs to search tools such as `grep`. An opt-in flag
@@ -308,7 +309,10 @@ What they left for stage 3 is in `docs/pipeline.md`'s "As Closed".
 ### Stage 3 — `pluck-path` (functional)
 
 Ships `jsptx .user.id`, adding path splitting, incremental key matching, and
-the matched-segment counter. Stage 2 built everything else.
+the matched-segment counter. Stage 2 built everything else. Merged 2026-09-15.
+One verification item below is still open: `--lines` does not yet reject a
+path landing on a container, since that needs an error carrying an offset,
+which the plucker cannot report yet.
 
 It also fixes record discovery, decided 2026-09-10: every top-level array
 unwraps, not only the first, and the decision reads the depth stack rather than

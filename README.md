@@ -7,19 +7,23 @@ selects, each one carrying the input's own bytes untouched. It never buffers a
 record, so a multi-gigabyte stream costs the same memory as a small one.
 
 ```bash
-$ printf '{"user":{"id":42}}\n{"user":{"id":71}}\n' | jsptx .
-{"user":{"id":42}}
-{"user":{"id":71}}
+$ printf '{"user":{"id":42}}\n{"user":{"id":71}}\n' | jsptx .user.id
+[42,71]
+$ printf '{"user":{"id":42}}\n{"user":{"id":71}}\n' | jsptx --lines .user.id
+42
+71
 ```
 
 ## Status
 
-Early, and useful for one thing: `jsptx .` splits a stream into records and
-prints each verbatim. Newline-delimited, concatenated, and top-level-array
-input all work, and `--buf-size` forces the read loop's edge cases.
+Early, and useful for one thing: `jsptx .user.id` picks one value out of each
+record and prints it verbatim, and `jsptx .` prints the whole record.
+Newline-delimited, concatenated, and top-level-array input all work, and
+`--buf-size` forces the read loop's edge cases.
 
-Paths beyond `.` are next, so `jsptx .user.id` does not work yet.
-`docs/plucker.md` plans that stage and the two output shapes it brings.
+A path is `.` or `.key.key`, splitting on `.` and nothing else, so a key may
+hold spaces. A throughput number beside `jq`'s is next. `docs/plucker.md`
+carries the plan.
 
 CI builds and tests on Linux at every push, and on macOS daily or on request,
 at both `c17` and `c99`.
