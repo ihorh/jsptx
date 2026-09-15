@@ -13,8 +13,8 @@ static const char *usage_text =
     "Usage: jsptx [PATH] [OPTIONS]\n"
     "\n"
     "  Reads a JSON stream on stdin. With PATH, prints each record's matching\n"
-    "  value verbatim, all inside one JSON array; \".\" matches the whole record\n"
-    "  and is the only path implemented so far. Without PATH, classifies the\n"
+    "  value verbatim, all inside one JSON array. PATH is \".\" for the whole\n"
+    "  record, or \".key.key\" for a nested value. Without PATH, classifies the\n"
     "  stream and discards the result.\n"
     "\n"
     "Options:\n"
@@ -55,16 +55,15 @@ static size_t parse_buf_size(jstr value) {
     return (size_t)p.value;
 }
 
-/* The path grammar this stage understands: "." alone, standing for the
-   whole record. Segment splitting lands in pluck-path; until then, any
-   other path is a clear error rather than a silent partial match. */
-static jstr parse_path(jstr arg) {
-    if (!jstr_equal(arg, JSTR("."))) {
-        fprintf(stderr, "jsptx: unsupported path: %.*s (only \".\" is implemented so far)\n",
-                (int)arg.len, arg.data);
+static jsp_path parse_path(jstr arg) {
+    jsp_path path;
+    if (!jsp_path_parse(arg, &path)) {
+        fprintf(stderr,
+                "jsptx: invalid path: %.*s (want \".\" or \".key.key\", at most %d keys)\n",
+                (int)arg.len, arg.data, JSP_PATH_MAX_SEGMENTS);
         exit(1);
     }
-    return arg;
+    return path;
 }
 
 static const jstr FLG_HELP = JSTR("--help");

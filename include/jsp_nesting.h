@@ -33,6 +33,11 @@ static inline unsigned jsp_nesting_depth(const jsp_nesting_state *state) {
     return jsp_bitstack_depth(&state->containers);
 }
 
+/* Whether the innermost open container is an object. False when none is open. */
+static inline _Bool jsp_nesting_innermost_is_object(const jsp_nesting_state *state) {
+    return !jsp_bitstack_empty(&state->containers) && jsp_bitstack_top(&state->containers);
+}
+
 /* Whether the outermost open container is an array. False when none is open. */
 static inline _Bool jsp_nesting_outermost_is_array(const jsp_nesting_state *state) {
     return !jsp_bitstack_empty(&state->containers) && !jsp_bitstack_at(&state->containers, 0);

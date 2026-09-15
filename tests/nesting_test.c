@@ -100,6 +100,17 @@ static void test_outermost_is_array(void) {
     assert(!jsp_nesting_outermost_is_array(&state));
 }
 
+static void test_innermost_is_object(void) {
+    jsp_nesting_state state = {0};
+    assert(!jsp_nesting_innermost_is_object(&state));
+    assert(jsp_nesting_step(&state, '[') == JSP_NESTING_OK);
+    assert(!jsp_nesting_innermost_is_object(&state));
+    assert(jsp_nesting_step(&state, '{') == JSP_NESTING_OK);
+    assert(jsp_nesting_innermost_is_object(&state));
+    assert(jsp_nesting_step(&state, '}') == JSP_NESTING_OK);
+    assert(!jsp_nesting_innermost_is_object(&state));
+}
+
 static void test_concatenated_values_each_return_to_depth_zero(void) {
     /* {}[]{} : three top-level values back to back, with no state surviving
        from one to the next. */
@@ -116,6 +127,7 @@ int main(void) {
     test_unbalanced();
     test_overflow_at_exactly_max_depth();
     test_outermost_is_array();
+    test_innermost_is_object();
     test_concatenated_values_each_return_to_depth_zero();
 
     printf("ok\n");

@@ -39,7 +39,8 @@ jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
                   jsp_trace_make(fds.trace_fd, settings.trace));
 
     jsp_status      result = JSP_OK;
-    jsp_pluck_state pluck_state = {.separator = settings.framing.separator};
+    jsp_pluck_state pluck_state = {.separator = settings.framing.separator,
+                                   .path = settings.path};
 
     if (jsp_write_jstr(fds.out_fd, settings.framing.open) != 0) {
         free(buf);

@@ -23,9 +23,28 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+/* Each runs with the path in its .path file, or "." when it has none. */
 static const char *const FIXTURES[] = {
-    "ndjson_objects", "array_unwrap", "bare_scalars",   "array_of_scalars",
-    "strings",        "nested",       "block_boundary", "multi_array_unwrap",
+    "ndjson_objects",
+    "array_unwrap",
+    "bare_scalars",
+    "array_of_scalars",
+    "strings",
+    "nested",
+    "block_boundary",
+    "multi_array_unwrap",
+    "path_ndjson",
+    "path_array_unwrap",
+    "path_container",
+    "path_key_with_space",
+    "path_misses",
+    "path_duplicates",
+    "path_value_kinds",
+    "path_escaped_key",
+    "path_scalar_at_block_end",
+    "path_long_key",
+    "path_value_spans_refill",
+    "path_split_key_mismatch",
 };
 
 /* The framings jsp_settings_parse picks for a path, one JSON array by
@@ -203,11 +222,10 @@ typedef struct {
     size_t     out_len;
 } pluck_run;
 
-/* Feeds input through a pipe into jsp_run in JSP_OUTPUT_PLUCK mode, one
-   JSON array or with lines one record per line, and reads back what it
-   wrote. The caller frees .out. */
+/* Feeds input through a pipe into jsp_run plucking path, one JSON array or
+   with lines one record per line, and reads back what it wrote. The caller frees .out. */
 static pluck_run
-run_pluck(const uint8_t *input, size_t input_len, size_t buf_size, bool lines) {
+run_pluck(const uint8_t *input, size_t input_len, jstr path, size_t buf_size, bool lines) {
     int in_pipe[2];
     int piped = pipe(in_pipe);
     assert(piped == 0);
@@ -221,11 +239,16 @@ run_pluck(const uint8_t *input, size_t input_len, size_t buf_size, bool lines) {
     }
     close(in_pipe[1]);
 
+    jsp_path parsed;
+    bool     path_ok = jsp_path_parse(path, &parsed);
+    assert(path_ok);
+
     int          out_fd = open_sink();
     jsp_fds      fds = {.in_fd = in_pipe[0], .out_fd = out_fd, .trace_fd = -1, .err_fd = -1};
     jsp_settings settings = {.buf_size = buf_size,
                              .output = JSP_OUTPUT_PLUCK,
                              .trace = JSP_TRACE_NONE,
+                             .path = parsed,
                              .framing = lines ? FRAMING_LINES : FRAMING_ARRAY};
     pluck_run    run = {.result = jsp_run(fds, settings)};
     close(in_pipe[0]);
@@ -254,21 +277,27 @@ static void run_fixture(const char *name, size_t buf_size, bool lines) {
     const char *suffix = lines ? ".lines" : "";
     char        json_path[256];
     char        expected_path[256];
+    char        path_path[256];
     char        case_name[256];
     snprintf(json_path, sizeof(json_path), "tests/data/pluck/%s.json", name);
     snprintf(expected_path, sizeof(expected_path), "tests/data/pluck/%s%s.expected", name,
              suffix);
+    snprintf(path_path, sizeof(path_path), "tests/data/pluck/%s.path", name);
     snprintf(case_name, sizeof(case_name), "pluck/%s%s buf_size=%zu", name, suffix, buf_size);
 
     size_t   input_len;
     uint8_t *input = read_file(json_path, &input_len);
     size_t   want_len;
     uint8_t *want = read_file(expected_path, &want_len);
+    size_t   path_len = 1;
+    uint8_t *path = access(path_path, F_OK) == 0 ? read_file(path_path, &path_len) : NULL;
+    jstr     path_str = path ? (jstr){(const char *)path, (ptrdiff_t)path_len} : JSTR(".");
 
-    pluck_run run = run_pluck(input, input_len, buf_size, lines);
+    pluck_run run = run_pluck(input, input_len, path_str, buf_size, lines);
     check_case(case_name, run.result, run.out, run.out_len, want, want_len);
 
     free(input);
+    free(path);
     free(want);
     free(run.out);
 }
@@ -278,13 +307,14 @@ static void run_fixture(const char *name, size_t buf_size, bool lines) {
 static void check_both_modes(const char *name, jstr input, jstr want_array, jstr want_lines) {
     char case_name[256];
 
-    pluck_run run = run_pluck((const uint8_t *)input.data, (size_t)input.len, 64, false);
+    pluck_run run =
+        run_pluck((const uint8_t *)input.data, (size_t)input.len, JSTR("."), 64, false);
     snprintf(case_name, sizeof(case_name), "%s buf_size=64", name);
     check_case(case_name, run.result, run.out, run.out_len, (const uint8_t *)want_array.data,
                (size_t)want_array.len);
     free(run.out);
 
-    run = run_pluck((const uint8_t *)input.data, (size_t)input.len, 64, true);
+    run = run_pluck((const uint8_t *)input.data, (size_t)input.len, JSTR("."), 64, true);
     snprintf(case_name, sizeof(case_name), "%s.lines buf_size=64", name);
     check_case(case_name, run.result, run.out, run.out_len, (const uint8_t *)want_lines.data,
                (size_t)want_lines.len);
@@ -315,7 +345,7 @@ static void test_no_records(void) {
    rather than emitting a partial record. */
 static void test_malformed_input_fails(void) {
     static const uint8_t input[] = "}";
-    pluck_run            run = run_pluck(input, sizeof(input) - 1, 64, false);
+    pluck_run            run = run_pluck(input, sizeof(input) - 1, JSTR("."), 64, false);
 
     /* JSP_ERR_BLOCK_PROCESS_TMP is the status today, but its name says it is
        a placeholder; what this test pins is that the run fails at all. */
