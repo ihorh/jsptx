@@ -6,6 +6,7 @@
 #include "jstr.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* jsp_run's real output, to out_fd. */
 typedef enum {
@@ -32,28 +33,33 @@ typedef struct {
 } jsp_framing;
 
 /* Everything jsp_run does once it's reading, cli-supplied or defaulted
-   alike. path is meaningful only when output is JSP_OUTPUT_PLUCK; its text views
-   the matching argv entry, which outlives the process. trace is orthogonal
-   to output: either can be set with the other, tracing the classification
-   behind whatever output is doing. */
+   alike. path and scalars_only are meaningful only when output is
+   JSP_OUTPUT_PLUCK; path's text views the matching argv entry, which outlives
+   the process. trace is orthogonal to output: either can be set with the
+   other, tracing the classification behind whatever output is doing. */
 typedef struct {
     size_t          buf_size;
     jsp_output_mode output;
     jsp_trace_mode  trace;
     jsp_path        path;
     jsp_framing     framing;
+    _Bool           scalars_only; /* a value that is an object or array fails the run */
 } jsp_settings;
 
 typedef enum {
     JSP_OK = 0,
     JSP_ERR_ALLOC,
-    JSP_ERR_IO,
-    JSP_ERR_BLOCK_PROCESS_TMP,
+    JSP_ERR_IO,        /* a read or write failed; sys_errno says how */
+    JSP_ERR_MALFORMED, /* an unbalanced or mismatched bracket, or nesting past JSP_MAX_DEPTH */
+    JSP_ERR_LINES_CONTAINER, /* scalars_only, and the path picked an object or array */
 } jsp_status;
 
+/* offset locates the byte at fault in the input stream, and is meaningful
+   only for JSP_ERR_MALFORMED and JSP_ERR_LINES_CONTAINER. */
 typedef struct {
     jsp_status status;
     int        sys_errno;
+    uint64_t   offset;
 } jsp_result;
 
 /* Reads fds.in_fd until end of file, classifying the structural JSON
@@ -79,10 +85,11 @@ typedef struct {
    lowercase hex digits and offset the block's first byte.
 
    Rounds settings.buf_size up to the nearest multiple of 64, with a
-   minimum of 64, and reads in chunks of that size. Returns 0 on success,
-   -1 on a read or write error with errno set by the failing call, or,
-   with JSP_OUTPUT_PLUCK, on malformed input: unbalanced or mismatched
-   brackets, or nesting past JSP_MAX_DEPTH. */
+   minimum of 64, and reads in chunks of that size. Returns JSP_OK, or the
+   status that stopped the run: JSP_ERR_IO with sys_errno set by the failing
+   call, or, with JSP_OUTPUT_PLUCK, JSP_ERR_MALFORMED or
+   JSP_ERR_LINES_CONTAINER with offset naming the byte at fault. Whatever
+   stopped it, settings.framing.close still goes out. */
 jsp_result jsp_run(jsp_fds fds, jsp_settings settings);
 
 #endif /* JSP_RUN_H */

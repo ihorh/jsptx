@@ -109,8 +109,10 @@ static const char *status_name(jsp_status status) {
         return "JSP_ERR_ALLOC";
     case JSP_ERR_IO:
         return "JSP_ERR_IO";
-    case JSP_ERR_BLOCK_PROCESS_TMP:
-        return "JSP_ERR_BLOCK_PROCESS_TMP";
+    case JSP_ERR_MALFORMED:
+        return "JSP_ERR_MALFORMED";
+    case JSP_ERR_LINES_CONTAINER:
+        return "JSP_ERR_LINES_CONTAINER";
     }
     return "(unknown jsp_status)";
 }

@@ -31,19 +31,31 @@ typedef struct {
     jsp_pluck_phase   phase;
     jstr              separator; /* written before every value but the first */
     jsp_path          path;
-    _Bool             emitted_any; /* at least one value was emitted */
+    _Bool             scalars_only; /* refuse a container value rather than emit it */
+    _Bool             emitted_any;  /* at least one value was emitted */
     jsp_nesting_state nesting;
     unsigned          segments_matched;  /* keys that led here; drops as their objects close */
     jstr              segment_text_left; /* path bytes the open key has yet to match */
     uint8_t           last_structural;   /* the last of { } [ ] : , " seen */
 } jsp_pluck_state;
 
+/* Why jsp_pluck_push stopped. The three failures all leave the stream where
+   it was: the token that was pushed is the one at fault, so its offset locates
+   the error. MALFORMED is an unbalanced or mismatched bracket, or nesting past
+   JSP_MAX_DEPTH. */
+typedef enum {
+    JSP_PLUCK_OK,
+    JSP_PLUCK_WRITE_FAILED,      /* a write to out_fd failed; errno is set */
+    JSP_PLUCK_MALFORMED,         /* the bracket just pushed breaks nesting */
+    JSP_PLUCK_CONTAINER_REFUSED, /* the path picked a container under scalars_only */
+} jsp_pluck_status;
+
 /* Takes one token, writing each value the path picks, its own bytes verbatim,
    straight to out_fd, with separator before every value but the first. A
    segment matches a key byte for byte, escapes included. Call once per token
    from jsp_scan_next, in order, for every BYTES and STRUCTURAL the stream
-   yields. Returns 0, or -1 on a write error or on malformed input: unbalanced
-   or mismatched brackets, or nesting past JSP_MAX_DEPTH. */
-int jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd);
+   yields. With scalars_only, a container value stops the walk before any of
+   its bytes, its separator included, reach out_fd. */
+jsp_pluck_status jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd);
 
 #endif /* JSP_PLUCK_H */

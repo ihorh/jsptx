@@ -141,8 +141,10 @@ static const char *status_name(jsp_status status) {
         return "JSP_ERR_ALLOC";
     case JSP_ERR_IO:
         return "JSP_ERR_IO";
-    case JSP_ERR_BLOCK_PROCESS_TMP:
-        return "JSP_ERR_BLOCK_PROCESS_TMP";
+    case JSP_ERR_MALFORMED:
+        return "JSP_ERR_MALFORMED";
+    case JSP_ERR_LINES_CONTAINER:
+        return "JSP_ERR_LINES_CONTAINER";
     }
     return "(unknown jsp_status)";
 }
@@ -172,18 +174,25 @@ static void print_window(const uint8_t *buf, size_t len, size_t from, size_t to)
     fputs(to < len ? "\"...\n" : "\"\n", stderr);
 }
 
-/* Checks one case's jsp_run status and output against want. On a mismatch it
-   reports the case by name, with the first differing byte and the bytes
-   around it on both sides, and counts a failure rather than aborting, so a
-   run shows every case a change breaks. */
-static void check_case(const char *name, jsp_result result, const uint8_t *got, size_t got_len,
-                       const uint8_t *want, size_t want_len) {
+static const jsp_result RESULT_OK = {.status = JSP_OK};
+
+/* Checks one case's jsp_run result, status and offset, and its output against
+   want. On a mismatch it reports the case by name, with the first differing
+   byte and the bytes around it on both sides, and counts a failure rather
+   than aborting, so a run shows every case a change breaks. */
+static void check_case(const char *name, jsp_result result, jsp_result want_result,
+                       const uint8_t *got, size_t got_len, const uint8_t *want,
+                       size_t want_len) {
     cases++;
     bool ok = true;
 
-    if (result.status != JSP_OK) {
-        fprintf(stderr, "FAIL %s: jsp_run returned %s (sys_errno %d)\n", name,
-                status_name(result.status), result.sys_errno);
+    if (result.status != want_result.status || result.offset != want_result.offset) {
+        fprintf(stderr,
+                "FAIL %s: jsp_run returned %s at offset %llu (sys_errno %d), want %s at offset "
+                "%llu\n",
+                name, status_name(result.status), (unsigned long long)result.offset,
+                result.sys_errno, status_name(want_result.status),
+                (unsigned long long)want_result.offset);
         ok = false;
     }
 
@@ -249,7 +258,8 @@ run_pluck(const uint8_t *input, size_t input_len, jstr path, size_t buf_size, bo
                              .output = JSP_OUTPUT_PLUCK,
                              .trace = JSP_TRACE_NONE,
                              .path = parsed,
-                             .framing = lines ? FRAMING_LINES : FRAMING_ARRAY};
+                             .framing = lines ? FRAMING_LINES : FRAMING_ARRAY,
+                             .scalars_only = lines};
     pluck_run    run = {.result = jsp_run(fds, settings)};
     close(in_pipe[0]);
 
@@ -272,17 +282,21 @@ run_pluck(const uint8_t *input, size_t input_len, jstr path, size_t buf_size, bo
 
 /* Runs one fixture at one buf_size in one output mode and checks what
    jsp_run wrote against the fixture's .expected file, or .lines.expected
-   under lines. */
+   under lines. A .lines.offset file means lines mode refuses the fixture's
+   first container value at that offset, and .lines.expected then holds what
+   went out before it. */
 static void run_fixture(const char *name, size_t buf_size, bool lines) {
     const char *suffix = lines ? ".lines" : "";
     char        json_path[256];
     char        expected_path[256];
     char        path_path[256];
+    char        offset_path[256];
     char        case_name[256];
     snprintf(json_path, sizeof(json_path), "tests/data/pluck/%s.json", name);
     snprintf(expected_path, sizeof(expected_path), "tests/data/pluck/%s%s.expected", name,
              suffix);
     snprintf(path_path, sizeof(path_path), "tests/data/pluck/%s.path", name);
+    snprintf(offset_path, sizeof(offset_path), "tests/data/pluck/%s.lines.offset", name);
     snprintf(case_name, sizeof(case_name), "pluck/%s%s buf_size=%zu", name, suffix, buf_size);
 
     size_t   input_len;
@@ -293,8 +307,17 @@ static void run_fixture(const char *name, size_t buf_size, bool lines) {
     uint8_t *path = access(path_path, F_OK) == 0 ? read_file(path_path, &path_len) : NULL;
     jstr     path_str = path ? (jstr){(const char *)path, (ptrdiff_t)path_len} : JSTR(".");
 
+    jsp_result want_result = RESULT_OK;
+    if (lines && access(offset_path, F_OK) == 0) {
+        size_t   offset_len;
+        uint8_t *offset_text = read_file(offset_path, &offset_len);
+        want_result.status = JSP_ERR_LINES_CONTAINER;
+        want_result.offset = strtoull((const char *)offset_text, NULL, 10);
+        free(offset_text);
+    }
+
     pluck_run run = run_pluck(input, input_len, path_str, buf_size, lines);
-    check_case(case_name, run.result, run.out, run.out_len, want, want_len);
+    check_case(case_name, run.result, want_result, run.out, run.out_len, want, want_len);
 
     free(input);
     free(path);
@@ -310,14 +333,14 @@ static void check_both_modes(const char *name, jstr input, jstr want_array, jstr
     pluck_run run =
         run_pluck((const uint8_t *)input.data, (size_t)input.len, JSTR("."), 64, false);
     snprintf(case_name, sizeof(case_name), "%s buf_size=64", name);
-    check_case(case_name, run.result, run.out, run.out_len, (const uint8_t *)want_array.data,
-               (size_t)want_array.len);
+    check_case(case_name, run.result, RESULT_OK, run.out, run.out_len,
+               (const uint8_t *)want_array.data, (size_t)want_array.len);
     free(run.out);
 
     run = run_pluck((const uint8_t *)input.data, (size_t)input.len, JSTR("."), 64, true);
     snprintf(case_name, sizeof(case_name), "%s.lines buf_size=64", name);
-    check_case(case_name, run.result, run.out, run.out_len, (const uint8_t *)want_lines.data,
-               (size_t)want_lines.len);
+    check_case(case_name, run.result, RESULT_OK, run.out, run.out_len,
+               (const uint8_t *)want_lines.data, (size_t)want_lines.len);
     free(run.out);
 }
 
@@ -341,23 +364,49 @@ static void test_no_records(void) {
     check_both_modes("empty_top_level_array", JSTR("[]"), JSTR("[]\n"), JSTR("\n"));
 }
 
-/* Depth errors (an unbalanced or mismatched closing bracket) fail the run
-   rather than emitting a partial record. */
-static void test_malformed_input_fails(void) {
-    static const uint8_t input[] = "}";
-    pluck_run            run = run_pluck(input, sizeof(input) - 1, JSTR("."), 64, false);
+/* Checks that a run at buf_size 64 failed with status at offset, and wrote
+   exactly want: what reached out_fd before the failure plus the close framing. */
+static void check_failure(const char *name, jstr input, jstr path, bool lines,
+                          jsp_status status, uint64_t offset, jstr want) {
+    pluck_run  run = run_pluck((const uint8_t *)input.data, (size_t)input.len, path, 64, lines);
+    jsp_result want_result = {.status = status, .offset = offset};
+    check_case(name, run.result, want_result, run.out, run.out_len, (const uint8_t *)want.data,
+               (size_t)want.len);
+    free(run.out);
+}
 
-    /* JSP_ERR_BLOCK_PROCESS_TMP is the status today, but its name says it is
-       a placeholder; what this test pins is that the run fails at all. */
-    cases++;
-    if (run.result.status == JSP_OK) {
-        fprintf(stderr, "FAIL malformed_input: jsp_run returned JSP_OK, want a failure\n");
-        fputs("  input: ", stderr);
-        print_window(input, sizeof(input) - 1, 0, sizeof(input) - 1);
-        fputs("  got:   ", stderr);
-        print_window(run.out, run.out_len, 0, run.out_len);
-        failures++;
-    }
+/* Depth errors (an unbalanced or mismatched closing bracket, or nesting past
+   JSP_MAX_DEPTH) fail the run at the bracket's offset rather than emitting a
+   partial record. */
+static void test_malformed_input_fails(void) {
+    check_failure("unbalanced_close", JSTR("}"), JSTR("."), false, JSP_ERR_MALFORMED, 0,
+                  JSTR("[]\n"));
+    check_failure("mismatched_close", JSTR("{\"a\":[1,2}"), JSTR("."), false, JSP_ERR_MALFORMED,
+                  9, JSTR("[{\"a\":[1,2]\n"));
+    check_failure("mismatched_close_past_refill",
+                  JSTR("[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,"
+                       "17,18,19,20,21,22,23,24,25,26,27}"),
+                  JSTR("."), false, JSP_ERR_MALFORMED, 72,
+                  JSTR("[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,"
+                       "27]\n"));
+}
+
+/* Under lines a value that is a container fails the run at its opening
+   bracket, before any of its bytes or its separator go out. In array mode
+   the same value emits verbatim. */
+static void test_lines_refuses_containers(void) {
+    check_failure("lines_object", JSTR("{\"a\":{\"b\":1}}"), JSTR(".a"), true,
+                  JSP_ERR_LINES_CONTAINER, 5, JSTR("\n"));
+    check_failure("lines_array_after_scalar", JSTR("{\"a\":1}\n{\"a\":[]}"), JSTR(".a"), true,
+                  JSP_ERR_LINES_CONTAINER, 13, JSTR("1\n"));
+    check_failure("lines_whole_record", JSTR("{}"), JSTR("."), true, JSP_ERR_LINES_CONTAINER, 0,
+                  JSTR("\n"));
+    check_failure("lines_unwrapped_element", JSTR("[1,[2]]"), JSTR("."), true,
+                  JSP_ERR_LINES_CONTAINER, 3, JSTR("1\n"));
+
+    pluck_run run = run_pluck((const uint8_t *)"{\"a\":{\"b\":1}}", 13, JSTR(".a"), 64, false);
+    check_case("array_mode_emits_container", run.result, RESULT_OK, run.out, run.out_len,
+               (const uint8_t *)"[{\"b\":1}]\n", 10);
     free(run.out);
 }
 
@@ -374,6 +423,7 @@ int main(void) {
     test_scalar_on_block_boundary();
     test_no_records();
     test_malformed_input_fails();
+    test_lines_refuses_containers();
 
     if (failures > 0) {
         fprintf(stderr, "pluck_test: %d of %d cases failed\n", failures, cases);

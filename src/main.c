@@ -2,7 +2,9 @@
 #include "jsp_settings.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 int main(int argc, char **argv) {
@@ -16,12 +18,22 @@ int main(int argc, char **argv) {
 
     jsp_result result = jsp_run(fds, settings);
 
-    if (result.status != JSP_OK) {
-        if (result.sys_errno != 0) {
-            fprintf(stderr, "jsptrx: %d, %s", result.sys_errno, strerror(result.sys_errno));
-        } else {
-            fprintf(stderr, "jsptx: malformed input\n");
-        }
+    switch (result.status) {
+    case JSP_OK:
+        break;
+    case JSP_ERR_ALLOC:
+    case JSP_ERR_IO:
+        fprintf(stderr, "jsptx: %s\n", strerror(result.sys_errno));
+        break;
+    case JSP_ERR_MALFORMED:
+        fprintf(stderr, "jsptx: malformed input at byte %" PRIu64 "\n", result.offset);
+        break;
+    case JSP_ERR_LINES_CONTAINER:
+        fprintf(stderr,
+                "jsptx: byte %" PRIu64
+                " starts an object or array, which --lines cannot print\n",
+                result.offset);
+        break;
     }
     return (int)result.status;
 }

@@ -27,6 +27,10 @@ static size_t scalar_prefix_(jsp_slice_u8 s) {
     return n;
 }
 
+static jsp_pluck_status write_(int out_fd, const uint8_t *p, size_t n) {
+    return jsp_write_all(out_fd, p, n) == 0 ? JSP_PLUCK_OK : JSP_PLUCK_WRITE_FAILED;
+}
+
 /* The depth records sit at: one level in while the outermost open container
    is an array, since every top-level array unwraps, and 0 otherwise. */
 static unsigned record_depth_(const jsp_pluck_state *state) {
@@ -59,13 +63,14 @@ static bool at_key_(const jsp_pluck_state *state) {
 
 /* Starts a value at the byte the caller just found, entering phase. Every
    value after the first gets the separator between it and the one before. */
-static int begin_value_(jsp_pluck_state *state, jsp_pluck_phase phase, int out_fd) {
+static jsp_pluck_status
+begin_value_(jsp_pluck_state *state, jsp_pluck_phase phase, int out_fd) {
     state->phase = phase;
     if (!state->emitted_any) {
         state->emitted_any = true;
-        return 0;
+        return JSP_PLUCK_OK;
     }
-    return jsp_write_jstr(out_fd, state->separator);
+    return write_(out_fd, (const uint8_t *)state->separator.data, (size_t)state->separator.len);
 }
 
 /* Handles one BYTES token: octets with no structural one among them. A string or
@@ -75,21 +80,21 @@ static int begin_value_(jsp_pluck_state *state, jsp_pluck_phase phase, int out_f
    string's are dropped. Otherwise the token holds bare scalars between
    whitespace, and each pass of the loop emits or drops one of them. A scalar
    reaching the token's end may continue into the next one, so it stays open. */
-static int push_bytes_(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
+static jsp_pluck_status push_bytes_(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
     if (state->phase == JSP_PLUCK_STRING || state->phase == JSP_PLUCK_CONTAINER) {
-        return jsp_write_all(out_fd, bytes.ptr, bytes.len);
+        return write_(out_fd, bytes.ptr, bytes.len);
     }
     if (state->phase == JSP_PLUCK_SKIP_STRING) {
-        return 0;
+        return JSP_PLUCK_OK;
     }
     if (state->phase == JSP_PLUCK_KEY) {
         jstr seen = {(const char *)bytes.ptr, (ptrdiff_t)bytes.len};
         if (!jstr_starts_with(state->segment_text_left, seen)) {
             state->phase = JSP_PLUCK_SKIP_STRING; /* differed: the rest of it cannot match */
-            return 0;
+            return JSP_PLUCK_OK;
         }
         state->segment_text_left = jstr_after(state->segment_text_left, seen.len);
-        return 0;
+        return JSP_PLUCK_OK;
     }
 
     jsp_slice_u8 rest = bytes;
@@ -98,36 +103,36 @@ static int push_bytes_(jsp_pluck_state *state, jsp_slice_u8 bytes, int out_fd) {
     }
     while (!jsp_slice_u8_empty(rest)) {
         if (state->phase == JSP_PLUCK_BETWEEN && at_value_(state) &&
-            begin_value_(state, JSP_PLUCK_SCALAR, out_fd) != 0) {
-            return -1;
+            begin_value_(state, JSP_PLUCK_SCALAR, out_fd) != JSP_PLUCK_OK) {
+            return JSP_PLUCK_WRITE_FAILED;
         }
         size_t n = scalar_prefix_(rest);
         if (state->phase == JSP_PLUCK_SCALAR) {
-            if (jsp_write_all(out_fd, rest.ptr, n) != 0) {
-                return -1;
+            if (write_(out_fd, rest.ptr, n) != JSP_PLUCK_OK) {
+                return JSP_PLUCK_WRITE_FAILED;
             }
             if (n == rest.len) {
-                return 0;
+                return JSP_PLUCK_OK;
             }
             state->phase = JSP_PLUCK_BETWEEN;
         }
         rest = jsp_slice_u8_after(rest, n);
         rest = jsp_slice_u8_after(rest, ws_prefix_(rest));
     }
-    return 0;
+    return JSP_PLUCK_OK;
 }
 
 /* Handles one mask bit: one of { } [ ] : , " in stream order, exactly the
    set jsp_nesting_step expects. Every one of them passes through
    jsp_nesting_step once, whatever phase it arrives in. */
-static int push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
+static jsp_pluck_status push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
     bool opening_wrapper = c == '[' && jsp_nesting_depth(&state->nesting) == 0;
     bool at_value = at_value_(state);
     bool at_key = at_key_(state);
 
     jsp_nesting_result r = jsp_nesting_step(&state->nesting, c);
     if (r != JSP_NESTING_OK) {
-        return -1;
+        return JSP_PLUCK_MALFORMED;
     }
     state->last_structural = c;
 
@@ -138,61 +143,64 @@ static int push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
         state->phase = JSP_PLUCK_BETWEEN;
     }
     if (opening_wrapper) {
-        return 0; /* a top-level array's own '[': not a record, stays BETWEEN */
+        return JSP_PLUCK_OK; /* a top-level array's own '[': not a record, stays BETWEEN */
     }
 
     if (state->phase == JSP_PLUCK_STRING) {
         /* every mask bit strictly inside a string is cleared; only its own
            closing quote survives to reach here */
         state->phase = JSP_PLUCK_BETWEEN;
-        return jsp_write_all(out_fd, &c, 1);
+        return write_(out_fd, &c, 1);
     }
 
     if (state->phase == JSP_PLUCK_KEY) {
         state->segments_matched += jstr_empty(state->segment_text_left);
         state->phase = JSP_PLUCK_BETWEEN;
-        return 0;
+        return JSP_PLUCK_OK;
     }
 
     if (state->phase == JSP_PLUCK_SKIP_STRING) {
         state->phase = JSP_PLUCK_BETWEEN;
-        return 0;
+        return JSP_PLUCK_OK;
     }
 
     if (state->phase == JSP_PLUCK_CONTAINER) {
-        if (jsp_write_all(out_fd, &c, 1) != 0) {
-            return -1;
+        if (write_(out_fd, &c, 1) != JSP_PLUCK_OK) {
+            return JSP_PLUCK_WRITE_FAILED;
         }
         unsigned end_depth = record_depth_(state) + state->path.segments;
         if ((c == '}' || c == ']') && jsp_nesting_depth(&state->nesting) == end_depth) {
             state->phase = JSP_PLUCK_BETWEEN;
         }
-        return 0;
+        return JSP_PLUCK_OK;
     }
 
     /* JSP_PLUCK_BETWEEN, a scalar just closed above included. */
     if (c == '"') {
         if (at_value) {
-            if (begin_value_(state, JSP_PLUCK_STRING, out_fd) != 0) {
-                return -1;
+            if (begin_value_(state, JSP_PLUCK_STRING, out_fd) != JSP_PLUCK_OK) {
+                return JSP_PLUCK_WRITE_FAILED;
             }
-            return jsp_write_all(out_fd, &c, 1);
+            return write_(out_fd, &c, 1);
         }
         state->phase = JSP_PLUCK_SKIP_STRING;
         if (at_key) {
             state->phase = JSP_PLUCK_KEY;
             state->segment_text_left = jsp_path_segment(&state->path, state->segments_matched);
         }
-        return 0;
+        return JSP_PLUCK_OK;
     }
     if (c == '{' || c == '[') {
         if (at_value) {
-            if (begin_value_(state, JSP_PLUCK_CONTAINER, out_fd) != 0) {
-                return -1;
+            if (state->scalars_only) {
+                return JSP_PLUCK_CONTAINER_REFUSED;
             }
-            return jsp_write_all(out_fd, &c, 1);
+            if (begin_value_(state, JSP_PLUCK_CONTAINER, out_fd) != JSP_PLUCK_OK) {
+                return JSP_PLUCK_WRITE_FAILED;
+            }
+            return write_(out_fd, &c, 1);
         }
-        return 0;
+        return JSP_PLUCK_OK;
     }
 
     unsigned depth = jsp_nesting_depth(&state->nesting);
@@ -209,10 +217,10 @@ static int push_structural_(jsp_pluck_state *state, uint8_t c, int out_fd) {
             state->segments_matched = depth - record_depth;
         }
     }
-    return 0;
+    return JSP_PLUCK_OK;
 }
 
-int jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd) {
+jsp_pluck_status jsp_pluck_push(jsp_pluck_state *state, jsp_token token, int out_fd) {
     if (token.kind == JSP_TOKEN_BYTES) {
         return push_bytes_(state, token.bytes, out_fd);
     }

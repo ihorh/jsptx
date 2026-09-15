@@ -262,9 +262,12 @@ Two things break it, and the rule covers both with no special case.
 | a container value | it carries the input's own newlines, so it spans lines |
 | `-r` on a string holding `\n` | unescaping puts a newline in the content |
 
-Precisely: the run errors when the octets it would emit contain `0x0A` or
-`0x0D`, naming the offset. A tab leaves line structure intact, so the rule
-passes it through rather than failing ordinary extracted text over it.
+Precisely: the run fails the moment the path picks an object or array,
+naming the offset of its opening bracket, and nothing of that value reaches
+stdout. The decision is by kind rather than by inspecting the bytes, settled
+2026-09-13, so a compact `{"b":1}` is refused too. Whatever went out before
+it stays out, followed by the closing newline, and the exit status is
+non-zero. A tab leaves line structure intact, so nothing rejects it.
 
 The promise then holds absolutely. A JSON number or literal is newline-free by
 its grammar, and RFC 8259 requires a string to escape every character below
@@ -310,9 +313,9 @@ What they left for stage 3 is in `docs/pipeline.md`'s "As Closed".
 
 Ships `jsptx .user.id`, adding path splitting, incremental key matching, and
 the matched-segment counter. Stage 2 built everything else. Merged 2026-09-15.
-One verification item below is still open: `--lines` does not yet reject a
-path landing on a container, since that needs an error carrying an offset,
-which the plucker cannot report yet.
+The `--lines` container rejection followed on `lines-scalars`: `jsp_run`
+attaches the offending token's offset to `jsp_result`, and the same seam gave
+malformed input its offset.
 
 It also fixes record discovery, decided 2026-09-10: every top-level array
 unwraps, not only the first, and the decision reads the depth stack rather than

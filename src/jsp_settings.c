@@ -18,7 +18,8 @@ static const char *usage_text =
     "  stream and discards the result.\n"
     "\n"
     "Options:\n"
-    "  --lines        print one value per line instead of one JSON array\n"
+    "  --lines        print one value per line instead of one JSON array;\n"
+    "                 a value that is an object or array fails the run\n"
     "  --buf-size=N   read in chunks of N bytes (default %zu)\n"
     "  --offsets      trace every structural character's offset to stderr\n"
     "  --masks        trace each block's classification to stderr, as hex\n"
@@ -125,6 +126,7 @@ jsp_settings jsp_settings_parse(int argc, char **argv) {
 
     if (have_path) {
         settings.framing = lines ? FRAMING_LINES : FRAMING_ARRAY;
+        settings.scalars_only = lines;
     }
     return settings;
 }

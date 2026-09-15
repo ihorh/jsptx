@@ -25,6 +25,21 @@ static inline jsp_result jsp_result_make_(jsp_status status) {
     return (jsp_result){.status = status, .sys_errno = status == JSP_OK ? 0 : errno};
 }
 
+/* The run's status for the way a push stopped, with the token that was
+   pushed locating an input error. */
+static jsp_result pluck_failure_(jsp_pluck_status status, uint64_t offset) {
+    switch (status) {
+    case JSP_PLUCK_MALFORMED:
+        return (jsp_result){.status = JSP_ERR_MALFORMED, .offset = offset};
+    case JSP_PLUCK_CONTAINER_REFUSED:
+        return (jsp_result){.status = JSP_ERR_LINES_CONTAINER, .offset = offset};
+    case JSP_PLUCK_WRITE_FAILED:
+    case JSP_PLUCK_OK:
+        break;
+    }
+    return jsp_result_make_(JSP_ERR_IO);
+}
+
 jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
     size_t cap = round_up_to(settings.buf_size, JSP_SCAN_BLOCK);
     /* calloc, since the classifier reads a whole JSP_SCAN_BLOCK even where
@@ -38,9 +53,10 @@ jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
     jsp_scan_init(&scan, fds.in_fd, jsp_buf_u8_make(buf, cap),
                   jsp_trace_make(fds.trace_fd, settings.trace));
 
-    jsp_status      result = JSP_OK;
+    jsp_result      result = {.status = JSP_OK};
     jsp_pluck_state pluck_state = {.separator = settings.framing.separator,
-                                   .path = settings.path};
+                                   .path = settings.path,
+                                   .scalars_only = settings.scalars_only};
 
     if (jsp_write_jstr(fds.out_fd, settings.framing.open) != 0) {
         free(buf);
@@ -51,13 +67,13 @@ jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
         jsp_scan_result next = jsp_scan_next(&scan);
         /* clang-format off */
         if (next.status == JSP_SCAN_END)   { break; }
-        if (next.status == JSP_SCAN_ERROR) { result = JSP_ERR_IO; break; }
+        if (next.status == JSP_SCAN_ERROR) { result = jsp_result_make_(JSP_ERR_IO); break; }
         /* clang-format on */
 
         if (settings.output == JSP_OUTPUT_PLUCK) {
-            int presult = jsp_pluck_push(&pluck_state, next.token, fds.out_fd);
-            if (presult != 0) {
-                result = JSP_ERR_BLOCK_PROCESS_TMP;
+            jsp_pluck_status pushed = jsp_pluck_push(&pluck_state, next.token, fds.out_fd);
+            if (pushed != JSP_PLUCK_OK) {
+                result = pluck_failure_(pushed, next.token.offset);
                 break;
             }
         }
@@ -66,5 +82,5 @@ jsp_result jsp_run(jsp_fds fds, jsp_settings settings) {
     jsp_write_jstr(fds.out_fd, settings.framing.close);
 
     free(buf);
-    return jsp_result_make_(result);
+    return result;
 }
