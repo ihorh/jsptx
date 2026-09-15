@@ -45,8 +45,8 @@ something runnable, so the work survives being picked up cold.
 
 1. **`docs-refocus`** — correct `design.md`. No code. **Merged.**
 2. **`pluck-identity`** — `jsptx .`, printing each record verbatim. **Merged.**
-3. **`pluck-path`** — `jsptx .user.id`. **Next.**
-4. **`pluck-bench`** — a throughput number beside `jq`'s.
+3. **`pluck-path`** — `jsptx .user.id`. **Merged.**
+4. **`pluck-bench`** — a throughput number beside `jq`'s. **Next.**
 
 Stage 2 carried the real work, proving the streaming machinery with no path
 logic in it. That leaves stage 3 as key matching on top. `docs/pipeline.md`
@@ -309,7 +309,10 @@ What they left for stage 3 is in `docs/pipeline.md`'s "As Closed".
 ### Stage 3 — `pluck-path` (functional)
 
 Ships `jsptx .user.id`, adding path splitting, incremental key matching, and
-the matched-segment counter. Stage 2 built everything else.
+the matched-segment counter. Stage 2 built everything else. Merged 2026-09-15.
+One verification item below is still open: `--lines` does not yet reject a
+path landing on a container, since that needs an error carrying an offset,
+which the plucker cannot report yet.
 
 It also fixes record discovery, decided 2026-09-10: every top-level array
 unwraps, not only the first, and the decision reads the depth stack rather than
