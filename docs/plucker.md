@@ -249,6 +249,11 @@ of newline-separated values would have left four gigabytes of usable data. That
 is the price of one predictable output shape, and `--lines` is the way out for a
 caller who would rather have the prefix.
 
+A run that stops on an error is the opposite case. It still writes the closing
+framing, so malformed input or a refused container leaves a parseable array
+holding what went out before the fault. The exit status and the message on
+stderr are the only signs the run failed.
+
 ### `--lines`, and the One Rule It Keeps
 
 `--lines` drops the array framing and writes one value per line. It holds a

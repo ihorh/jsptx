@@ -22,8 +22,10 @@ Newline-delimited, concatenated, and top-level-array input all work, and
 `--buf-size` forces the read loop's edge cases.
 
 A path is `.` or `.key.key`, splitting on `.` and nothing else, so a key may
-hold spaces. A throughput number beside `jq`'s is next. `docs/plucker.md`
-carries the plan.
+hold spaces. `--lines` refuses a value that is an object or array, since it
+cannot fit on one line, and exits non-zero naming the byte offset.
+
+A throughput number beside `jq`'s is next. `docs/plucker.md` carries the plan.
 
 CI builds and tests on Linux at every push, and on macOS daily or on request,
 at both `c17` and `c99`.
